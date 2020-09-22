@@ -1,5 +1,19 @@
 # falconry
 
+![Python package](https://github.com/fnechans/falconry/workflows/Python%20package/badge.svg)
+
+## Table of contents
+
+- [Introduction](#introduction)
+- [Installing falconry](#install)
+
+## Introduction
+
+Falconry is lightweight python package to create and manage your HTCondor jobs. 
+
+Detailed documentation not available yet, check `example.py`. Package has to be first installed using pip as described in section on [Installing falconry](#install).
+
+
 ## Installing falconry
 
 To install falconry, simply call following in the repository directory:
