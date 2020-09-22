@@ -11,6 +11,7 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 
+# using argparse to get command line arguments
 def config():
     import argparse
     parser = argparse.ArgumentParser(description="Falconry. Read README!")
@@ -21,18 +22,29 @@ def config():
 
 def main():
 
+    # getting command line arguments and creating the manager
+    # the manager will periodically check the jobs and handle dependencies
     cfg = config()
-    mgr = manager(cfg.dir)
+    mgr = manager(cfg.dir)  # the argument specifies where the job is saved
 
+    # short function to simplify the job setup
     def simple_job(name: str, exe: str) -> job:
+        # define job and pass the HTCondor schedd to it
         j = job(name, mgr.schedd)
+
+        # set the executable and the path to the log files
         j.set_simple(exe, cfg.dir+"/log/")
+
+        # set the expected run time in seconds
         j.set_time(120)
         return j
 
+    # if --cont command line argument called, load previous job
+    # otherwise create jobs
     if cfg.cont:
         mgr.load()
     else:
+        # as a test, prepare one job which succeeds and one that fails
         j = simple_job("success", "util/echoS.sh")
         j.submit()
         mgr.add_job(j)
@@ -43,6 +55,7 @@ def main():
         mgr.add_job(j)
         depE = [j]
 
+        # add job depending on the two submitted job to demonstrate what happens if depending job fails or succeds
         j = simple_job("success_depS", "util/echoS.sh")
         j.add_job_dependency(depS)
         mgr.add_job(j)
@@ -51,8 +64,11 @@ def main():
         j.add_job_dependency(depE)
         mgr.add_job(j)
 
+    # start the manager
+    # if there is an error, especially interupt with keyboard,
+    # save the current state of jobs
     try:
-        mgr.start()
+        mgr.start(60)  # argument is interval between checking of the jobs
     except KeyboardInterrupt:
         log.error("Manager interrupted with keyboard!")
         log.error("Saving and exitting ...")
