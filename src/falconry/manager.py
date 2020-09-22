@@ -5,7 +5,7 @@ import os
 import datetime         # so user knowns the time of last check
 from time import sleep  # used for sleep time between checks
 
-from typing import List, Dict, Any
+from typing import Dict, Any
 
 from . import job
 from . import translate
@@ -29,8 +29,7 @@ class manager:
         self.schedd = htcondor.Schedd()
 
         # job collection
-        self.jobs: List[job.job] = []  # holds jobs
-        self.jobNames: List[str] = []  # holds job names to ensure uniqueness
+        self.jobs: Dict[str, job.job] = {}
 
         # flags
         self.retryFailed = False
@@ -43,19 +42,18 @@ class manager:
     # add a job to the manager
     def add_job(self, j: job.job):
         # first check if the jobs already exists
-        if j.name in self.jobNames:
+        if j.name in self.jobs.keys():
             log.error("Job %s already exists! Exiting ...")
             raise SystemExit
 
-        self.jobs.append(j)
-        self.jobNames.append(j.name)
+        self.jobs[j.name] = j
 
     # save current status
     def save(self):
         log.info("Saving current status of jobs")
         output: Dict[str, Any] = {}
-        for j in self.jobs:
-            output[j.name] = j.save()
+        for name, j in self.jobs.items():
+            output[name] = j.save()
 
         with open(self.dir+"/data.json", "w") as f:
             json.dump(output, f)
@@ -63,19 +61,29 @@ class manager:
 
     # load saved jobs
     def load(self):
+        log.info("Loading past status of jobs")
         with open(self.dir+"/data.json", "r") as f:
             input = json.load(f)
             for name, jobDict in input.items():
+                # create a job
                 j = job.job(name, self.schedd)
                 j.load(jobDict)
+                # add it to the manager
                 self.add_job(j)
+
+                # decorate the list of names of the dependencies
+                j.depNames = jobDict["depNames"]
+            # now that jobs are defined, dependencies can be recreated:
+            for j in self.jobs.values():
+                dependencies = [self.jobs[name] for name in j.depNames]
+                j.add_job_dependency(dependencies)
 
     # check all tasks in queue whether the jobs they depend on already finished.
     # If some of them failed, add this task to the skipped.
     def check_dependence(self):
         # TODO: consider if not submitted jobs in a special list
 
-        for j in self.jobs:
+        for name, j in self.jobs.items():
             # only check jobs which are neither submitted nor skipped
             if j.submitted or j.skipped:
                 continue
@@ -90,7 +98,7 @@ class manager:
                 isReady = False
 
                 if tarJob.skipped or tarJob.failed:
-                    log.error("Job %s depends on job %s which either failed or was skipped! Skipping ...", j.name, tarJob.name)
+                    log.error("Job %s depends on job %s which either failed or was skipped! Skipping ...", name, tarJob.name)
                     j.skipped = True
                 break
             if isReady:
@@ -113,9 +121,6 @@ class manager:
         while True:
             log.info("Checking status of jobs [%s]", str(datetime.datetime.now()))
 
-            # checking dependencies and submitting ready jobs
-            self.check_dependence()
-
             waiting = 0
             notSub = 0
             idle = 0
@@ -125,7 +130,7 @@ class manager:
             skipped = 0
 
             # resubmit jobs and find out state of the jobs
-            for j in self.jobs:
+            for j in self.jobs.values():
 
                 # ignore jobs which are not submitted, skipped or done
                 if j.skipped:
@@ -162,6 +167,9 @@ class manager:
             # if no job is waiting nor running, finish the manager
             if not (waiting or (notSub + idle + run > 0)):
                 break
+
+            # checking dependencies and submitting ready jobs
+            self.check_dependence()
 
             sleep(sleepTime)
 

@@ -59,10 +59,12 @@ class job:
 
     # define dict containing all relevant job information
     def save(self) -> Dict[str, Any]:
+        # first rewrite dependencies using names
+        depNames = [j.name for j in self.dependencies]
         jobDict = {
             "clusterIDs": self.clusterIDs,
-            #"dependencies": self.dependencies,
-            "config": self.config
+            "config": self.config,
+            "depNames": depNames
         }
         return jobDict
 
@@ -77,13 +79,16 @@ class job:
         self.config = jobDict["config"]
         self.htjob = htcondor.Submit(self.config)
 
-        # set cluster IDs and dependencies
-        self.clusterIDs = jobDict["clusterIDs"]
-        self.clusterID = self.clusterIDs[-1]
-        self.dependencies = jobDict["dependencies"]
-
         # setup flags:
         self.reset()
+
+        # set cluster IDs
+        self.clusterIDs = jobDict["clusterIDs"]
+        # if not empty, the job has been already submitted at least once
+        if len(self.clusterIDs):
+            self.clusterID = self.clusterIDs[-1]
+            self.logFile = self.config["log"].replace("$(ClusterId)", str(self.clusterIDs[-1]))
+            self.submitted = True
 
     # reset job flags
     def reset(self) -> None:
@@ -111,7 +116,7 @@ class job:
         with self.schedd.transaction() as txn:
             self.clusterID = self.htjob.queue(txn)
             self.clusterIDs.append(self.clusterID)
-            log.debug("Submitting job with id %s", self.clusterID)
+            log.info("Submitting job %s with id %s", self.name, self.clusterID)
             self.logFile = self.config["log"].replace("$(ClusterId)", str(self.clusterIDs[-1]))
 
         # reset job properties
