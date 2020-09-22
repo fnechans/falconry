@@ -1,6 +1,6 @@
 
 # Translation of the Job status
-status = {
+statusMessage = {
     0: "UNKNOWN",
     1: "IDLE",
     2: "RUNNING",

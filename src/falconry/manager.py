@@ -1,15 +1,20 @@
 import htcondor  # for submitting jobs, querying HTCondor daemons, etc.
 import logging
+import json
+import os
+import datetime         # so user knowns the time of last check
+from time import sleep  # used for sleep time between checks
 
-from typing import List
+from typing import List, Dict, Any
 
 from . import job
+from . import translate
 
 log = logging.getLogger(__name__)
 
 
 class manager:
-    """ Manager holds all the job and periodically checks their status.
+    """ Manager holds all jobs and periodically checks their status.
 
     It also take care of dependent jobs,
     submitting jobs when all dependencies are satisfied.
@@ -17,12 +22,11 @@ class manager:
     """
 
     # Initialize the manager, maily getting the htcondor schedd
-    def __init__(self):
+    def __init__(self, mgrDir):
         log.info("MONITOR: INIT")
 
         #  get the schedd
         self.schedd = htcondor.Schedd()
-        print(self.schedd)
 
         # job collection
         self.jobs: List[job.job] = []  # holds jobs
@@ -30,6 +34,11 @@ class manager:
 
         # flags
         self.retryFailed = False
+
+        # now create a directory where the info about jobs will be save
+        if not os.path.exists(mgrDir):
+            os.makedirs(mgrDir)
+        self.dir = mgrDir
 
     # add a job to the manager
     def add_job(self, j: job.job):
@@ -40,6 +49,26 @@ class manager:
 
         self.jobs.append(j)
         self.jobNames.append(j.name)
+
+    # save current status
+    def save(self):
+        log.info("Saving current status of jobs")
+        output: Dict[str, Any] = {}
+        for j in self.jobs:
+            output[j.name] = j.save()
+
+        with open(self.dir+"/data.json", "w") as f:
+            json.dump(output, f)
+            log.info("Success!")
+
+    # load saved jobs
+    def load(self):
+        with open(self.dir+"/data.json", "r") as f:
+            input = json.load(f)
+            for name, jobDict in input.items():
+                j = job.job(name, self.schedd)
+                j.load(jobDict)
+                self.add_job(j)
 
     # check all tasks in queue whether the jobs they depend on already finished.
     # If some of them failed, add this task to the skipped.
@@ -67,11 +96,18 @@ class manager:
             if isReady:
                 j.submit()
 
+    # check if some job should be resubmitted
+    def check_resubmit(self, j: job.job):
+        status = j.get_status()
+        if status > 0:
+            log.debug("Job %s has status %s", j.name, translate.statusMessage[status])
+        if status == 12 or (self.retryFailed and status < 0):
+            log.warning("Error! Job %s failed due to condor, rerunning", j.name)
+            j.submit()
+
     # start the manager, iteratively checking status of jobs
     def start(self, sleepTime: int = 60):
 
-        import datetime         # so user knowns the time of last check
-        from time import sleep  # used for sleep time between checks
         log.info("MONITOR: START")
 
         while True:
@@ -91,31 +127,32 @@ class manager:
             # resubmit jobs and find out state of the jobs
             for j in self.jobs:
 
-                # ignore jobs which are not submitted
-                if not j.submitted:
+                # ignore jobs which are not submitted, skipped or done
+                if j.skipped:
+                    skipped += 1
+                    continue
+                elif not j.submitted:
                     waiting += 1
                     continue
+                elif j.done:
+                    done += 1
+                    continue
 
-                # first resubmit jobs
-                status = j.get_status()
-                log.debug("Job %s has status %u", j.name, status)
-                if status == 12 or (self.retryFailed and status < 0):
-                    log.warning("Error! Job %s failed due to condor, rerunning", j.name)
-                    j.submit()
+                #  resubmit jobs which failed due to condor problems
+                self.check_resubmit(j)
 
                 # count jobs with different statuses
+                status = j.get_status()
                 if status == 9 or status == 10:
                     notSub += 1
                 elif status == 1:
                     idle += 1
                 elif status == 2:
                     run += 1
-                elif status == 12 or (self.retryFailed and status < 0):
+                elif status < 0:
                     failed += 1
                 elif status == 4:
                     done += 1
-                elif status == 8:
-                    skipped += 1
 
             log.info(
                 "Not sub.: %s | idle: %s | running: %s | failed: %s | done: %s | waiting: %s | skipped: %s",

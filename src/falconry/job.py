@@ -1,8 +1,8 @@
-import htcondor  # for submitting jobs, querying HTCondor daemons, etc.
+import htcondor
 import os
 import logging
 
-from typing import List, Dict,Any
+from typing import List, Dict, Any
 
 from . import translate
 
@@ -19,7 +19,6 @@ class job:
     and then resubmit individual jobs anyway.
     """
 
-
     # Define the job by its name and add a schedd
     def __init__(self, name: str, schedd: htcondor.Schedd) -> None:
 
@@ -27,6 +26,12 @@ class job:
         self.schedd = schedd
 
         self.name = name        # name of the job for easy identification
+
+        # since we will be resubmitting, job IDs are kept as a list
+        self.clusterIDs: List[str] = []
+
+        # add a decoration to the job to hold dependencies
+        self.dependencies: List["job"] = []
 
     # set up a simple job with only executable and a path to log files
     def set_simple(self, exe: str, logPath: str):
@@ -42,41 +47,35 @@ class job:
         log.debug(cfg)
 
         # create the directory for the log
-        logDir = os.getcwd() + "/" + logPath + "/" + name + "/"
+        logDir = os.getcwd() + "/" + logPath + "/" + self.name + "/"
         if not os.path.exists(logDir):
             os.makedirs(logDir)
 
         # the htcondor version of the configuration
         self.htjob = htcondor.Submit(self.config)
 
-        # since we will be resubmitting, job IDs are kept as a list
-        self.clusterIDs: List[str] = []
-
-        # add a decoration to the job to hold dependencies
-        self.dependencies: List["job"] = []
-
         # setup flags:
         self.reset()
 
     # define dict containing all relevant job information
-    def save(self) -> Dict[str,Any]:
+    def save(self) -> Dict[str, Any]:
         jobDict = {
             "clusterIDs": self.clusterIDs,
-            "dependencies": self.dependencies,
+            #"dependencies": self.dependencies,
             "config": self.config
         }
         return jobDict
 
     # define job from dictionary created using the save function
     # TODO: define proper "jobDict checker"
-    def load(self, jobDict: Dict[str,Any]) -> None:
+    def load(self, jobDict: Dict[str, Any]) -> None:
         if "clusterIDs" not in jobDict.keys() and "config" not in jobDict.keys():
             log.error("Job dictionary in a wrong form")
             raise SystemError
 
         # the htcondor version of the configuration
         self.config = jobDict["config"]
-        self.htjob = htcondor.Submit(self.config)]
+        self.htjob = htcondor.Submit(self.config)
 
         # set cluster IDs and dependencies
         self.clusterIDs = jobDict["clusterIDs"]
@@ -102,11 +101,11 @@ class job:
     def submit(self) -> None:
         # first check if job was not submitted before:
         if self.clusterIDs != []:
-            status = self.get_condor_status()
+            status = self.get_status()
             if status == 12 or status < 0 or status == 10:
                 log.info("Job %s failed and will be resubmitted.", self.name)
             else:
-                log.info("The job is %s, not submitting", translate.status[status])
+                log.info("The job is %s, not submitting", translate.statusMessage[status])
                 return
 
         with self.schedd.transaction() as txn:
@@ -133,26 +132,39 @@ class job:
         return True
 
     # get information about the job
-    def get_info(self) -> None:
+    def get_info(self) -> Dict[str, Any]:
         # check if job has an ID
         if self.clusterIDs == []:
             log.error("Trying to list info for a job which was not submitted")
             raise SystemError
 
-        # get all job info
+        constr = "ClusterId == " + str(self.clusterID)
+        # get all job info of running job
         ads = self.schedd.query(
-            constraint="ClusterId==" + str(self.clusterID)
+            constraint=constr
         )
+
+        # if the job finished, query will be empty and we have to use history
+        # because condor is stupid, it returns and iterator (?),
+        # so just returning first element
+        # TODO: add more to projection
+        if ads == []:
+            for ad in self.schedd.history(
+                requirements=constr,
+                projection=["JobStatus"]
+            ):
+                return ad
 
         # check if only one job was returned
         if len(ads) != 1:
-            log.error("HTCondor returned more than one job for given ID, this should not happen!")
+            log.error("HTCondor returned more than one or 0 jobs for given ID, this should not happen!")
+            print(ads)
             raise SystemError
 
-        return ads[0] # we take only single job, so return onl the first eleement
+        return ads[0]  # we take only single job, so return onl the first eleement
 
     # get condor status of the job
-    def get_condor_status(self) -> None:
+    def get_condor_status(self) -> int:
         return self.get_info()["JobStatus"]
 
     # get status of the job, as defined in translate.py
@@ -169,9 +181,11 @@ class job:
         cndr_status = self.get_condor_status()
         # If job complete, check if with error:
         if cndr_status == 4:
-            with open(self.config["log"]) as search:
-                if "Job terminated" in search.read():
-                    for line in search:
+            with open(self.logFile) as fl:
+                search = fl.read()
+                if "Job terminated" in search:
+                    searchSplit = search.split("\n")
+                    for line in searchSplit:
                         line = line.rstrip()  # remove '\n' at end of line
                         if "Normal termination (return value" in line:
                             status = int(line.split("value")[1].strip()[:-1])
@@ -183,12 +197,12 @@ class job:
                             self.failed = True
                             return -status
                     return 11  # no "Normal termination for Job terminated"
-                elif "Job was aborted by the user" in search.read():
+                elif "Job was aborted by the user" in search:
                     # I think this is the same as 3 but need to check
                     return 12
                 else:
                     log.error("Uknown output of job %s!", self.name)
-        return 0
+        return cndr_status
 
     def set_custom(self, dict: Dict[str, str]) -> None:
         for key, item in dict.items():
