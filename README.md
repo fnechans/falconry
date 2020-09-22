@@ -9,10 +9,9 @@
 
 ## Introduction
 
-Falconry is lightweight python package to create and manage your HTCondor jobs. 
+Falconry is lightweight python package to create and manage your [HTCondor](https://github.com/htcondor/) jobs. 
 
 Detailed documentation not available yet, check `example.py`. Package has to be first installed using pip as described in section on [installation](#installation).
-
 
 ## Installation
 
@@ -22,7 +21,7 @@ To install falconry, simply call following in the repository directory:
 
 Then you can include the package in your project simply by adding:
 
-    include falconry
+    import falconry
 
 ### Installing python3 API for HTCondor
 
