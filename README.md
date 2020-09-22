@@ -1,6 +1,6 @@
+# falconry
 
-
-### Installing falconry
+## Installing falconry
 
 To install falconry, simply call following in the repository directory:
 
@@ -10,7 +10,7 @@ Then you can include the package in your project simply by adding:
 
     include falconry
 
-## Installing python3 API for HTCondor
+### Installing python3 API for HTCondor
 
 The package  requires htcondor API to run. However, the dependency cannot be linked directly because the condor version depends on the version of htcondor your cluster uses.
 
