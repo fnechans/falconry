@@ -6,7 +6,7 @@ Quickstart
 Job
 ---
 
-First unit of the falconry is job, imported simpl as::
+Basic unit of the falconry is a job, which simply mantains all properties and submition.  It can be imported simply as::
 
     from falconry import job
 
@@ -23,11 +23,13 @@ There are several ways to initialize the job properties, but for a simple job, o
 
     j.set_simple(executablaPath, logFilesPath)
 
-One can setup the expected run time with 'set_time(runtime)' defined in seconds::
+which only requires path to the executable and path to a dir where the log files will be saves. Both path can be relative wrt. to the directory where the python script is run.
+
+One can setup the expected run time with``set_time(runtime)`` defined in seconds::
 
     j.set_time(3600)
 
-Generally, one can add or overwrite any options to the job using``'set_custom(options)`` function where options are simply dictionary::
+Generally, one can add or overwrite any options to the job using``set_custom(options)`` function where options are simply dictionary::
 
     j.set_custom({"arguments": " --out X"})
 
@@ -39,12 +41,19 @@ And then to submit the job simply::
 Manager
 -------
 
-When launching large number of jobs, especially with some dependencies between them, it is convenient to use manager class::
+When launching large number of jobs, especially with some dependencies between them, it is convenient to use manager class. It handles all the jobs, queues and automatically submits those which are ready.
+
+The manager can be imported as::
 
     from falconry import manager
     mgr = manager(dir)
 
-The manager can save all jobs it managesin a data.json file which will be located in the specified ``dir``, so one can easily start again without rerunning already finished jobs. To add a job to the manager simply do::
+It automatically finds local schedd, so jobs can be then initialized as::
+
+    from falconry import job
+    j = job(name, mgr.schedd)
+
+without need to import HTCondor. To add a job to the manager simply do::
 
     mgr.add_job(j)
 
