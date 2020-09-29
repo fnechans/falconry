@@ -117,6 +117,7 @@ class manager:
 
     # start the manager, iteratively checking status of jobs
     def start(self, sleepTime: int = 60):
+        # TODO: maybe add flag to save for each check? or every n-th check?
 
         log.info("MONITOR: START")
 
@@ -177,15 +178,15 @@ class manager:
 
         log.info("MONITOR: FINISHED")
 
-    def start_safe(self, sleepTime: int = 60):
     # if there is an error, especially interupt with keyboard,
     # save the current state of jobs
-    try:
-        self.start(sleepTime)  # argument is interval between checking of the jobs
-    except KeyboardInterrupt:
-        log.error("Manager interrupted with keyboard!")
-        log.error("Saving and exitting ...")
-    except Exception:
-        traceback.print_exc(file=sys.stdout)
-    mgr.save()
-    sys.exit(0)
+    def start_safe(self, sleepTime: int = 60):
+        try:
+            self.start(sleepTime)  # argument is interval between checking of the jobs
+        except KeyboardInterrupt:
+            log.error("Manager interrupted with keyboard!")
+            log.error("Saving and exitting ...")
+        except Exception:
+            traceback.print_exc(file=sys.stdout)
+        self.save()
+        sys.exit(0)

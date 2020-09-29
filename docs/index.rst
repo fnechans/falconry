@@ -10,7 +10,8 @@ Welcome to falconry's documentation!
    :maxdepth: 2
    :caption: Contents:
 
-
+   usage/install
+   usage/quickstart
 
 Indices and tables
 ==================
