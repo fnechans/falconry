@@ -1,6 +1,7 @@
 # falconry
 
 ![Python package](https://github.com/fnechans/falconry/workflows/Python%20package/badge.svg)
+[![Documentation Status](https://readthedocs.org/projects/falconry/badge/?version=latest)](https://falconry.readthedocs.io/en/latest/?badge=latest)
 
 ## Table of contents
 
