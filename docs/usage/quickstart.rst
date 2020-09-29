@@ -75,4 +75,4 @@ However, user may want to interupt the programm, or there may be a crash. In tha
 Simple program
 --------------
 
-An example of a complete implemenation can be found in ``example.py``, which puts all these features together. It also uses command line parses to make the usage more convenient, so it automatically loads previous instance if '-- cont' command line argument is used.
+An example of a complete implemenation can be found in ``example.py``, which puts all these features together. It also uses command line parses to make the usage more convenient, so it automatically loads previous instance if ``-- cont`` command line argument is used.
