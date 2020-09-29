@@ -67,16 +67,7 @@ def main():
     # start the manager
     # if there is an error, especially interupt with keyboard,
     # save the current state of jobs
-    try:
-        mgr.start(60)  # argument is interval between checking of the jobs
-    except KeyboardInterrupt:
-        log.error("Manager interrupted with keyboard!")
-        log.error("Saving and exitting ...")
-    except Exception:
-        traceback.print_exc(file=sys.stdout)
-    mgr.save()
-    sys.exit(0)
-
+    mgr.start_safe(60)  # argument is interval between checking of the jobs
 
 if __name__ == "__main__":
     main()
