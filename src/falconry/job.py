@@ -182,7 +182,6 @@ class job:
         elif not os.path.isfile(self.logFile):
             return 10
 
-        # Positive numbers are reserved for condor
         cndr_status = self.get_condor_status()
         # If job complete, check if with error:
         if cndr_status == 4:

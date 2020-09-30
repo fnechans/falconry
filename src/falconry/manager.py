@@ -118,6 +118,8 @@ class manager:
     # start the manager, iteratively checking status of jobs
     def start(self, sleepTime: int = 60):
         # TODO: maybe add flag to save for each check? or every n-th check?
+        # TODO: I feel that there may be a better way to handle number of each job type,
+        #       but it will be only used here, so maybe not necessary
 
         log.info("MONITOR: START")
 
@@ -135,7 +137,7 @@ class manager:
             # resubmit jobs and find out state of the jobs
             for j in self.jobs.values():
 
-                # ignore jobs which are not submitted, skipped or done
+                # evaluate jobs which are not submitted, skipped or done
                 if j.skipped:
                     skipped += 1
                     continue

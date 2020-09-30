@@ -10,7 +10,7 @@ Basic unit of the falconry is a job, which simply mantains all properties and su
 
     from falconry import job
 
-Jobs require an HTCondor schedd. There is more convenient way to acquire it in the 'Manager' class mentioned later on, for now let's start with proper HTCondor python API setup::
+Jobs require an HTCondor schedd. There is more convenient way to acquire it in the ``manager`` class mentioned later on, for now let's start with proper HTCondor python API setup::
 
     import htcondor
     schedd = htcondor.Schedd()
@@ -25,11 +25,11 @@ There are several ways to initialize the job properties, but for a simple job, o
 
 which only requires path to the executable and path to a dir where the log files will be saves. Both path can be relative wrt. to the directory where the python script is run.
 
-One can setup the expected run time with``set_time(runtime)`` defined in seconds::
+One can setup the expected run time with ``set_time(runtime)`` defined in seconds::
 
     j.set_time(3600)
 
-Generally, one can add or overwrite any options to the job using``set_custom(options)`` function where options are simply dictionary::
+Generally, one can add or overwrite any options to the job using ``set_custom(options)`` function where options are simply dictionary::
 
     j.set_custom({"arguments": " --out X"})
 
@@ -71,8 +71,8 @@ However, user may want to interupt the programm, or there may be a crash. In tha
 
     mgr.load()
 
---------------
-Simple program
---------------
+---------------
+Example program
+---------------
 
-An example of a complete implemenation can be found in ``example.py``, which puts all these features together. It also uses command line parses to make the usage more convenient, so it automatically loads previous instance if ``-- cont`` command line argument is used.
+An example of a complete implemenation can be found in ``example.py``, which puts all these features together. It also uses command line parser to make the usage more convenient. E.g. it automatically loads previous instance if ``-- cont`` command line argument is used.

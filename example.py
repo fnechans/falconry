@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 
 import logging
-import sys
-import traceback
 from falconry import manager, job
 
 logging.basicConfig(
