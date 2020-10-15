@@ -14,6 +14,7 @@ def config():
     import argparse
     parser = argparse.ArgumentParser(description="Falconry. Read README!")
     parser.add_argument("--cont", action="store_true", help="Load jobs from previous iteration and continue")
+    parser.add_argument("--debug", action="store_true", help="Debug mode with more verbose printout")
     parser.add_argument("--dir", type=str, help="Path to output DIR. Output by default.", default="Output")
     return parser.parse_args()
 
@@ -23,6 +24,10 @@ def main():
     # getting command line arguments and creating the manager
     # the manager will periodically check the jobs and handle dependencies
     cfg = config()
+
+    if cfg.debug:
+        logging.getLogger("falconry").setLevel(logging.DEBUG)
+
     mgr = manager(cfg.dir)  # the argument specifies where the job is saved
 
     # short function to simplify the job setup
@@ -44,12 +49,14 @@ def main():
     else:
         # as a test, prepare one job which succeeds and one that fails
         j = simple_job("success", "util/echoS.sh")
+        # use job::submit to submit the job. With manager, this is not necessary,
+        # when job does not have and dependency it is submitted automatically!
         j.submit()
         mgr.add_job(j)
         depS = [j]
 
         j = simple_job("error", "util/echoE.sh")
-        j.submit()
+        # here we let manager to handle the submition
         mgr.add_job(j)
         depE = [j]
 
@@ -64,8 +71,11 @@ def main():
 
     # start the manager
     # if there is an error, especially interupt with keyboard,
-    # save the current state of jobs
+    # saves the current state of jobs
     mgr.start_safe(60)  # argument is interval between checking of the jobs
+    mgr.print_failed()
+    mgr.save()
+
 
 if __name__ == "__main__":
     main()

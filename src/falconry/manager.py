@@ -80,9 +80,17 @@ class manager:
                 dependencies = [self.jobs[name] for name in j.depNames]
                 j.add_job_dependency(dependencies)
 
+    # print names of all failed jobs
+    def print_failed(self):
+        log.info("Printing failed jobs:")
+        for name, j in self.jobs.items():
+            if j.get_status < 0:
+                log.info(name)
+
     # check all tasks in queue whether the jobs they depend on already finished.
     # If some of them failed, add this task to the skipped.
     def check_dependence(self):
+
         # TODO: consider if not submitted jobs in a special list
 
         for name, j in self.jobs.items():
@@ -102,7 +110,15 @@ class manager:
                 if tarJob.skipped or tarJob.failed:
                     log.error("Job %s depends on job %s which either failed or was skipped! Skipping ...", name, tarJob.name)
                     j.skipped = True
+
+                status = tarJob.get_status()
+                if status == 3:
+                    log.error("Job %s depends on job %s which is %s! Skipping ...",
+                              name, tarJob.name, translate.statusMessage[status])
+                    j.skipped = True
+
                 break
+
             if isReady:
                 j.submit()
 
@@ -188,7 +204,9 @@ class manager:
         except KeyboardInterrupt:
             log.error("Manager interrupted with keyboard!")
             log.error("Saving and exitting ...")
+            self.save()
+            sys.exit(0)
         except Exception:
             traceback.print_exc(file=sys.stdout)
-        self.save()
-        sys.exit(0)
+            self.save()
+            sys.exit(0)

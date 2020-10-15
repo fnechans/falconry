@@ -61,7 +61,9 @@ If you want job to start after certain other jobs finish (dependency), add them 
 
     j.add_dependency(j1, j2, j3)
 
-The manager will then start the job once all dependencies are succesfully finished. Now, start the manager with following command::
+The manager will then start the job once all dependencies are succesfully finished. This means that jobs without dependencies are submitted automatically, no need to call ``job.submit()``
+
+Now, start the manager with following command::
 
     mgr.start(checkTime)
 
