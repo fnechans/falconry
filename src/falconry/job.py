@@ -74,7 +74,6 @@ class job:
 
         # the htcondor version of the configuration
         self.config = jobDict["config"]
-        self.htjob = htcondor.Submit(self.config)
 
         # setup flags:
         self.reset()
@@ -83,6 +82,7 @@ class job:
         self.clusterIDs = jobDict["clusterIDs"]
         # if not empty, the job has been already submitted at least once
         if len(self.clusterIDs):
+            self.htjob = htcondor.Submit(self.config)
             self.clusterID = self.clusterIDs[-1]
             self.logFile = self.config["log"].replace("$(ClusterId)", str(self.clusterIDs[-1]))
             self.submitted = True
