@@ -44,15 +44,12 @@ class job:
             "log":          logPath + "/" + self.name + "/$(ClusterId).log"
         }
         self.config = cfg
-        log.debug(cfg)
 
         # create the directory for the log
         logDir = os.getcwd() + "/" + logPath + "/" + self.name + "/"
         if not os.path.exists(logDir):
             os.makedirs(logDir)
 
-        # the htcondor version of the configuration
-        self.htjob = htcondor.Submit(self.config)
 
         # setup flags:
         self.reset()
@@ -112,11 +109,15 @@ class job:
             else:
                 log.info("The job is %s, not submitting", translate.statusMessage[status])
                 return
+        else:
+            # the htcondor version of the configuration
+            self.htjob = htcondor.Submit(self.config)
 
         with self.schedd.transaction() as txn:
             self.clusterID = self.htjob.queue(txn)
             self.clusterIDs.append(self.clusterID)
             log.info("Submitting job %s with id %s", self.name, self.clusterID)
+            log.debug(self.config)
             self.logFile = self.config["log"].replace("$(ClusterId)", str(self.clusterIDs[-1]))
 
         # reset job properties
