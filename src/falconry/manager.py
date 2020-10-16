@@ -67,25 +67,34 @@ class manager:
         with open(self.dir+"/data.json", "r") as f:
             input = json.load(f)
             for name, jobDict in input.items():
+
                 # create a job
                 j = job.job(name, self.schedd)
                 j.load(jobDict)
+
                 # add it to the manager
                 self.add_job(j)
 
                 # decorate the list of names of the dependencies
                 j.depNames = jobDict["depNames"]
-            # now that jobs are defined, dependencies can be recreated:
+
+            # now that jobs are defined, dependencies can be recreated
+            # also resubmit jobs which failed
             for j in self.jobs.values():
                 dependencies = [self.jobs[name] for name in j.depNames]
                 j.add_job_dependency(dependencies)
+
+                oldFlag = self.retryFailed
+                self.retryFailed = True
+                self.check_resubmit(j)
+                self.retryFailed = oldFlag
 
     # print names of all failed jobs
     def print_failed(self):
         log.info("Printing failed jobs:")
         for name, j in self.jobs.items():
-            if j.get_status < 0:
-                log.info(name)
+            if j.get_status() < 0:
+                log.info("%s (id %u)", name, j.clusterID)
 
     # check all tasks in queue whether the jobs they depend on already finished.
     # If some of them failed, add this task to the skipped.
@@ -127,8 +136,11 @@ class manager:
         status = j.get_status()
         if status > 0:
             log.debug("Job %s has status %s", j.name, translate.statusMessage[status])
-        if status == 12 or (self.retryFailed and status < 0):
-            log.warning("Error! Job %s failed due to condor, rerunning", j.name)
+        if status == 12:
+            log.warning("Error! Job %s (id %s) failed due to condor, rerunning", j.name, j.clusterID)
+            j.submit()
+        elif (self.retryFailed and status < 0):
+            log.warning("Error! Job %s (id %s) failed and will be retried, rerunning", j.name, j.clusterID)
             j.submit()
 
     # start the manager, iteratively checking status of jobs

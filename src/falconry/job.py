@@ -87,6 +87,8 @@ class job:
             self.logFile = self.config["log"].replace("$(ClusterId)", str(self.clusterIDs[-1]))
             self.submitted = True
 
+        self.get_status()
+
     # reset job flags
     def reset(self) -> None:
         self.submitted = False
