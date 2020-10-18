@@ -45,7 +45,7 @@ class manager:
     def add_job(self, j: job.job):
         # first check if the jobs already exists
         if j.name in self.jobs.keys():
-            log.error("Job %s already exists! Exiting ...")
+            log.error("Job %s already exists! Exiting ...", j.name)
             raise SystemExit
 
         self.jobs[j.name] = j

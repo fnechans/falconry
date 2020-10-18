@@ -96,9 +96,10 @@ class job:
         self.failed = False
         self.done = False
 
-    # extend dependencies
-    def add_job_dependency(self, dps: List["job"]) -> None:
-        self.dependencies.extend(dps)
+    # extend dependen
+    # old def add_job_dependency(self, dps: List["job"]) -> None:
+    def add_job_dependency(self, *args: List["job"]) -> None:
+        self.dependencies.extend(list(args))
 
     # submit the job
     # TODO: raise error if problem
