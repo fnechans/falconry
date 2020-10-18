@@ -33,9 +33,6 @@ class manager:
         # job collection
         self.jobs: Dict[str, job.job] = {}
 
-        # flags
-        self.retryFailed = False
-
         # now create a directory where the info about jobs will be save
         if not os.path.exists(mgrDir):
             os.makedirs(mgrDir)
@@ -62,7 +59,7 @@ class manager:
             log.info("Success!")
 
     # load saved jobs
-    def load(self):
+    def load(self, retryFailed: bool = False):
         log.info("Loading past status of jobs")
         with open(self.dir+"/data.json", "r") as f:
             input = json.load(f)
@@ -84,10 +81,8 @@ class manager:
                 dependencies = [self.jobs[name] for name in j.depNames]
                 j.add_job_dependency(dependencies)
 
-                oldFlag = self.retryFailed
-                self.retryFailed = True
-                self.check_resubmit(j)
-                self.retryFailed = oldFlag
+                if retryFailed:
+                    self.check_resubmit(j, True)
 
     # print names of all failed jobs
     def print_failed(self):
@@ -132,14 +127,14 @@ class manager:
                 j.submit()
 
     # check if some job should be resubmitted
-    def check_resubmit(self, j: job.job):
+    def check_resubmit(self, j: job.job, retryFailed: bool = False):
         status = j.get_status()
         if status > 0:
             log.debug("Job %s has status %s", j.name, translate.statusMessage[status])
         if status == 12:
             log.warning("Error! Job %s (id %s) failed due to condor, rerunning", j.name, j.clusterID)
             j.submit()
-        elif (self.retryFailed and status < 0):
+        elif retryFailed and status < 0:
             log.warning("Error! Job %s (id %s) failed and will be retried, rerunning", j.name, j.clusterID)
             j.submit()
 

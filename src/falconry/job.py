@@ -50,7 +50,6 @@ class job:
         if not os.path.exists(logDir):
             os.makedirs(logDir)
 
-
         # setup flags:
         self.reset()
 
@@ -132,12 +131,14 @@ class job:
         if self.clusterIDs == []:
             return False
         self.schedd.act(htcondor.JobAction.Release, "ClusterId == "+str(self.clusterID))
+        log.info("Releasing job %s with id %s", self.name, self.clusterID)
         return True
 
     def remove(self) -> bool:
         if self.clusterIDs == []:
             return False
         self.schedd.act(htcondor.JobAction.Remove, "ClusterId == "+str(self.clusterID))
+        log.info("Removing job %s with id %s", self.name, self.clusterID)
         return True
 
     # get information about the job
