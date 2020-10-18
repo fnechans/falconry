@@ -97,7 +97,7 @@ class job:
 
     # extend dependen
     # old def add_job_dependency(self, dps: List["job"]) -> None:
-    def add_job_dependency(self, *args: List["job"]) -> None:
+    def add_job_dependency(self, *args: "job") -> None:
         self.dependencies.extend(list(args))
 
     # submit the job
@@ -169,6 +169,7 @@ class job:
         if len(ads) != 1:
             log.error("HTCondor returned more than one or 0 jobs for given ID, this should not happen!")
             print(ads)
+            log.error("Job %s with id %u", self.name, self.clusterID)
             raise SystemError
 
         return ads[0]  # we take only single job, so return onl the first eleement

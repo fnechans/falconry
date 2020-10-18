@@ -63,6 +63,7 @@ class manager:
         log.info("Loading past status of jobs")
         with open(self.dir+"/data.json", "r") as f:
             input = json.load(f)
+            depNames = {}
             for name, jobDict in input.items():
 
                 # create a job
@@ -73,13 +74,13 @@ class manager:
                 self.add_job(j)
 
                 # decorate the list of names of the dependencies
-                j.depNames = jobDict["depNames"]
+                depNames[j.name] = jobDict["depNames"]
 
             # now that jobs are defined, dependencies can be recreated
             # also resubmit jobs which failed
             for j in self.jobs.values():
-                dependencies = [self.jobs[name] for name in j.depNames]
-                j.add_job_dependency(dependencies)
+                dependencies = [self.jobs[name] for name in depNames[j.name]]
+                j.add_job_dependency(*dependencies)
 
                 if retryFailed:
                     self.check_resubmit(j, True)
