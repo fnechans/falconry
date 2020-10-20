@@ -73,8 +73,8 @@ def main():
     # if there is an error, especially interupt with keyboard,
     # saves the current state of jobs
     mgr.start_safe(60)  # argument is interval between checking of the jobs
-    mgr.print_failed()
     mgr.save()
+    mgr.print_failed()
 
 
 if __name__ == "__main__":

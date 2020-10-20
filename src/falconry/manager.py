@@ -65,6 +65,7 @@ class manager:
             input = json.load(f)
             depNames = {}
             for name, jobDict in input.items():
+                log.debug("Loading job %s", name)
 
                 # create a job
                 j = job.job(name, self.schedd)
