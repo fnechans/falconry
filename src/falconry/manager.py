@@ -43,9 +43,6 @@ class manager:
         # job collection
         self.jobs: Dict[str, job.job] = {}
 
-        # flags
-        self.retryFailed = False
-
         # now create a directory where the info about jobs will be save
         if not os.path.exists(mgrDir):
             os.makedirs(mgrDir)
@@ -55,7 +52,7 @@ class manager:
     def add_job(self, j: job.job):
         # first check if the jobs already exists
         if j.name in self.jobs.keys():
-            log.error("Job %s already exists! Exiting ...")
+            log.error("Job %s already exists! Exiting ...", j.name)
             raise SystemExit
 
         self.jobs[j.name] = j
@@ -72,30 +69,39 @@ class manager:
             log.info("Success!")
 
     # load saved jobs
-    def load(self):
+    def load(self, retryFailed: bool = False):
         log.info("Loading past status of jobs")
         with open(self.dir+"/data.json", "r") as f:
             input = json.load(f)
+            depNames = {}
             for name, jobDict in input.items():
+                log.debug("Loading job %s", name)
+
                 # create a job
                 j = job.job(name, self.schedd)
                 j.load(jobDict)
+
                 # add it to the manager
                 self.add_job(j)
 
                 # decorate the list of names of the dependencies
-                j.depNames = jobDict["depNames"]
-            # now that jobs are defined, dependencies can be recreated:
+                depNames[j.name] = jobDict["depNames"]
+
+            # now that jobs are defined, dependencies can be recreated
+            # also resubmit jobs which failed
             for j in self.jobs.values():
-                dependencies = [self.jobs[name] for name in j.depNames]
-                j.add_job_dependency(dependencies)
+                dependencies = [self.jobs[name] for name in depNames[j.name]]
+                j.add_job_dependency(*dependencies)
+
+                if retryFailed:
+                    self.check_resubmit(j, True)
 
     # print names of all failed jobs
     def print_failed(self):
         log.info("Printing failed jobs:")
         for name, j in self.jobs.items():
             if j.get_status() < 0:
-                log.info(name)
+                log.info("%s (id %u)", name, j.clusterID)
 
     # check all tasks in queue whether the jobs they depend on already finished.
     # If some of them failed, add this task to the skipped.
@@ -133,12 +139,15 @@ class manager:
                 j.submit()
 
     # check if some job should be resubmitted
-    def check_resubmit(self, j: job.job):
+    def check_resubmit(self, j: job.job, retryFailed: bool = False):
         status = j.get_status()
         if status > 0:
             log.debug("Job %s has status %s", j.name, translate.statusMessage[status])
-        if status == 12 or (self.retryFailed and status < 0):
-            log.warning("Error! Job %s failed due to condor, rerunning", j.name)
+        if status == 12:
+            log.warning("Error! Job %s (id %s) failed due to condor, rerunning", j.name, j.clusterID)
+            j.submit()
+        elif retryFailed and status < 0:
+            log.warning("Error! Job %s (id %s) failed and will be retried, rerunning", j.name, j.clusterID)
             j.submit()
  
 

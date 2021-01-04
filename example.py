@@ -62,17 +62,17 @@ def main():
 
         # add job depending on the two submitted job to demonstrate what happens if depending job fails or succeds
         j = simple_job("success_depS", "util/echoS.sh")
-        j.add_job_dependency(depS)
+        j.add_job_dependency(*depS)
         mgr.add_job(j)
 
         j = simple_job("success_depE", "util/echoS.sh")
-        j.add_job_dependency(depE)
+        j.add_job_dependency(*depE)
         mgr.add_job(j)
 
     # start the manager
     # if there is an error, especially interupt with keyboard,
     # saves the current state of jobs
-    mgr.start_safe(60, gui = True)  # argument is interval between checking of the jobs
+    mgr.start_safe(60, gui = False)  # argument is interval between checking of the jobs
     mgr.print_failed()
     mgr.save()
 

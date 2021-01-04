@@ -12,7 +12,7 @@
 
 Falconry is lightweight python package to create and manage your [HTCondor](https://github.com/htcondor/) jobs. 
 
-Detailed documentation not available yet, check `example.py`. Package has to be first installed using pip as described in section on [installation](#installation).
+Detailed documentation can be found on [ReadTheDocs](https://falconry.readthedocs.io/en/latest/index.html). You can also check `example.py` for an example of usage. Package has to be first installed using pip as described in section on [installation](#installation).
 
 ## Installation
 

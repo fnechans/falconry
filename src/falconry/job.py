@@ -50,7 +50,6 @@ class job:
         if not os.path.exists(logDir):
             os.makedirs(logDir)
 
-
         # setup flags:
         self.reset()
 
@@ -87,6 +86,8 @@ class job:
             self.logFile = self.config["log"].replace("$(ClusterId)", str(self.clusterIDs[-1]))
             self.submitted = True
 
+        self.get_status()
+
     # reset job flags
     def reset(self) -> None:
         self.submitted = False
@@ -94,9 +95,10 @@ class job:
         self.failed = False
         self.done = False
 
-    # extend dependencies
-    def add_job_dependency(self, dps: List["job"]) -> None:
-        self.dependencies.extend(dps)
+    # extend dependen
+    # old def add_job_dependency(self, dps: List["job"]) -> None:
+    def add_job_dependency(self, *args: "job") -> None:
+        self.dependencies.extend(list(args))
 
     # submit the job
     # TODO: raise error if problem
@@ -129,12 +131,14 @@ class job:
         if self.clusterIDs == []:
             return False
         self.schedd.act(htcondor.JobAction.Release, "ClusterId == "+str(self.clusterID))
+        log.info("Releasing job %s with id %s", self.name, self.clusterID)
         return True
 
     def remove(self) -> bool:
         if self.clusterIDs == []:
             return False
         self.schedd.act(htcondor.JobAction.Remove, "ClusterId == "+str(self.clusterID))
+        log.info("Removing job %s with id %s", self.name, self.clusterID)
         return True
 
     # get information about the job
@@ -163,9 +167,17 @@ class job:
 
         # check if only one job was returned
         if len(ads) != 1:
-            log.error("HTCondor returned more than one or 0 jobs for given ID, this should not happen!")
-            print(ads)
-            raise SystemError
+            # empty job is probably job finished a long ago
+            # return specific code -999 and let get_status function
+            # sort the rest from the log files
+            if ads == []:
+                return {"JobStatus": -999}
+            else:
+                log.error("HTCondor returned more than one jobs for given ID, this should not happen!")
+                log.error("Job %s with id %u", self.name, self.clusterID)
+                print(ads)
+                raise SystemError
+
 
         return ads[0]  # we take only single job, so return onl the first eleement
 
@@ -185,7 +197,7 @@ class job:
 
         cndr_status = self.get_condor_status()
         # If job complete, check if with error:
-        if cndr_status == 4:
+        if cndr_status == 4 or cndr_status == -999:
             with open(self.logFile) as fl:
                 search = fl.read()
                 if "Job terminated" in search:
