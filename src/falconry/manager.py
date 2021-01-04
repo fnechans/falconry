@@ -13,7 +13,17 @@ from . import job
 from . import translate
 
 log = logging.getLogger(__name__)
-
+   
+class counter:
+    # just holds few variables used in status print
+    def __init__(self):
+        self.waiting = 0
+        self.notSub = 0
+        self.idle = 0
+        self.run = 0
+        self.failed = 0
+        self.done = 0
+        self.skipped = 0
 
 class manager:
     """ Manager holds all jobs and periodically checks their status.
@@ -84,7 +94,7 @@ class manager:
     def print_failed(self):
         log.info("Printing failed jobs:")
         for name, j in self.jobs.items():
-            if j.get_status < 0:
+            if j.get_status() < 0:
                 log.info(name)
 
     # check all tasks in queue whether the jobs they depend on already finished.
@@ -130,63 +140,60 @@ class manager:
         if status == 12 or (self.retryFailed and status < 0):
             log.warning("Error! Job %s failed due to condor, rerunning", j.name)
             j.submit()
+ 
+
+    # resubmit jobs and find out state of the jobs
+    def count_jobs(self, c: counter):
+            
+        for j in self.jobs.values():
+
+            # evaluate jobs which are not submitted, skipped or done
+            if j.skipped:
+                c.skipped += 1
+                continue
+            elif not j.submitted:
+                c.waiting += 1
+                continue
+            elif j.done:
+                c.done += 1
+                continue
+
+            #  resubmit jobs which failed due to condor problems
+            self.check_resubmit(j)
+
+            # count jobs with different statuses
+            status = j.get_status()
+            if status == 9 or status == 10:
+                c.notSub += 1
+            elif status == 1:
+                c.idle += 1
+            elif status == 2:
+                c.run += 1
+            elif status < 0:
+                c.failed += 1
+            elif status == 4:
+                c.done += 1
+
 
     # start the manager, iteratively checking status of jobs
     def start(self, sleepTime: int = 60):
         # TODO: maybe add flag to save for each check? or every n-th check?
-        # TODO: I feel that there may be a better way to handle number of each job type,
-        #       but it will be only used here, so maybe not necessary
 
         log.info("MONITOR: START")
 
         while True:
             log.info("Checking status of jobs [%s]", str(datetime.datetime.now()))
 
-            waiting = 0
-            notSub = 0
-            idle = 0
-            run = 0
-            failed = 0
-            done = 0
-            skipped = 0
-
-            # resubmit jobs and find out state of the jobs
-            for j in self.jobs.values():
-
-                # evaluate jobs which are not submitted, skipped or done
-                if j.skipped:
-                    skipped += 1
-                    continue
-                elif not j.submitted:
-                    waiting += 1
-                    continue
-                elif j.done:
-                    done += 1
-                    continue
-
-                #  resubmit jobs which failed due to condor problems
-                self.check_resubmit(j)
-
-                # count jobs with different statuses
-                status = j.get_status()
-                if status == 9 or status == 10:
-                    notSub += 1
-                elif status == 1:
-                    idle += 1
-                elif status == 2:
-                    run += 1
-                elif status < 0:
-                    failed += 1
-                elif status == 4:
-                    done += 1
+            c = counter()
+            self.count_jobs(c)
 
             log.info(
                 "Not sub.: %s | idle: %s | running: %s | failed: %s | done: %s | waiting: %s | skipped: %s",
-                notSub, idle, run, failed, done, waiting, skipped
+                c.notSub, c.idle, c.run, c.failed, c.done, c.waiting, c.skipped
             )
 
             # if no job is waiting nor running, finish the manager
-            if not (waiting or (notSub + idle + run > 0)):
+            if not (c.waiting + c.notSub + c.idle + c.run > 0):
                 break
 
             # checking dependencies and submitting ready jobs
@@ -196,11 +203,72 @@ class manager:
 
         log.info("MONITOR: FINISHED")
 
+    # start the manager with gui, iteratively checking status of jobs
+    def start_gui(self, sleepTime: int = 60):
+
+        import tkinter as tk
+
+        window = tk.Tk()
+        window.title("Falconry monitor")
+        frm_counter = tk.Frame()
+
+        def quick_label(name: str, x: int, y: int = 0 ):
+            lbl = tk.Label(master=frm_counter, width=10, text=name)
+            lbl.grid(row=y, column=x)
+            return lbl
+
+        quick_label("Not sub.:", 0)
+        quick_label("Idle:", 1)
+        quick_label("Running:", 2)
+        quick_label("Failed:", 3)
+        quick_label("Done:", 4)
+        quick_label("Waiting:", 5)
+        quick_label("Skipped:", 6)
+        labels = {}
+        labels["ns"] = quick_label("0", 0, 1)
+        labels["i"] = quick_label("0", 1, 1)
+        labels["r"] = quick_label("0", 2, 1)
+        labels["f"] = quick_label("0", 3, 1)
+        labels["d"] = quick_label("0", 4, 1)
+        labels["w"] = quick_label("0", 5, 1)
+        labels["s"] = quick_label("0", 6, 1)
+
+        frm_counter.grid(row=0, column=0)
+
+        def tk_count():
+            c = counter()
+            self.count_jobs(c)
+            labels["ns"]["text"] = f"{c.notSub}"
+            labels["i"]["text"] = f"{c.idle}"
+            labels["r"]["text"] = f"{c.run}"
+            labels["f"]["text"] = f"{c.failed}"
+            labels["d"]["text"] = f"{c.done}"
+            labels["w"]["text"] = f"{c.waiting}"
+            labels["s"]["text"] = f"{c.skipped}"
+
+            # if no job is waiting nor running, finish the manager
+            # TODO: add condition (close on finish)
+            #if not (c.waiting + c.notSub + c.idle + c.run > 0):
+            #    window.destroy()
+
+            # checking dependencies and submitting ready jobs
+            self.check_dependence()
+
+            window.after(1000*sleepTime, tk_count)
+
+        tk_count()
+        log.info("MONITOR: START")
+        window.mainloop()
+        log.info("MONITOR: FINISHED")
+
     # if there is an error, especially interupt with keyboard,
     # save the current state of jobs
-    def start_safe(self, sleepTime: int = 60):
+    def start_safe(self, sleepTime: int = 60, gui: bool = False):
         try:
-            self.start(sleepTime)  # argument is interval between checking of the jobs
+            if gui:
+                self.start_gui(sleepTime)
+            else:
+                self.start(sleepTime)  # argument is interval between checking of the jobs
         except KeyboardInterrupt:
             log.error("Manager interrupted with keyboard!")
             log.error("Saving and exitting ...")

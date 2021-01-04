@@ -72,7 +72,7 @@ def main():
     # start the manager
     # if there is an error, especially interupt with keyboard,
     # saves the current state of jobs
-    mgr.start_safe(60)  # argument is interval between checking of the jobs
+    mgr.start_safe(60, gui = True)  # argument is interval between checking of the jobs
     mgr.print_failed()
     mgr.save()
 
