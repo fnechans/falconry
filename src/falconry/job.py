@@ -96,8 +96,6 @@ class job:
             self.logFile = self.config["log"].replace("$(ClusterId)", str(self.clusterIDs[-1]))
             self.submitted = True
 
-        #self.get_status()
-
     # reset job flags
     def reset(self) -> None:
         self.submitted = False
@@ -114,7 +112,7 @@ class job:
     # TODO: raise error if problem
     def submit(self, force: bool = False) -> None:
         # force: for cases when the job status was checked
-        # e.g. when retrying 
+        # e.g. when retrying
         # this is can save a lot of time because
         # failed job required the log file to be read.
         # Should not be used by users, only internally.
@@ -194,7 +192,6 @@ class job:
                 print(ads)
                 raise SystemError
 
-
         return ads[0]  # we take only single job, so return onl the first eleement
 
     # get condor status of the job
@@ -203,7 +200,7 @@ class job:
 
     # get status of the job, as defined in translate.py
     def get_status(self) -> int:
-   
+
         # First check if the job is skipped or not even submitted
         if self.skipped:
             return 8
@@ -247,8 +244,8 @@ class job:
 
     def set_time(self, runTime: int) -> None:
         self.config["+MaxRuntime"] = str(runTime)
-        #TODO: this does not work on UI
-        #self.config["+RequestRuntime"] = str(runTime)
+        # TODO: this does not work on UI
+        # self.config["+RequestRuntime"] = str(runTime)
 
     def set_arguments(self, args: str) -> None:
         self.config["arguments"] = args

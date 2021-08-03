@@ -13,7 +13,8 @@ from . import job
 from . import translate
 
 log = logging.getLogger(__name__)
-   
+
+
 class counter:
     # just holds few variables used in status print
     def __init__(self):
@@ -25,6 +26,7 @@ class counter:
         self.done = 0
         self.skipped = 0
         self.removed = 0
+
 
 class manager:
     """ Manager holds all jobs and periodically checks their status.
@@ -150,11 +152,10 @@ class manager:
         elif retryFailed and status < 0:
             log.warning("Error! Job %s (id %s) failed and will be retried, rerunning", j.name, j.clusterID)
             j.submit(force=True)
- 
 
     # resubmit jobs and find out state of the jobs
     def count_jobs(self, c: counter):
-            
+
         for j in self.jobs.values():
 
             # evaluate jobs which are not submitted, skipped or done
@@ -185,7 +186,6 @@ class manager:
                 c.done += 1
             elif status == 3:
                 c.removed += 1
-
 
     # start the manager, iteratively checking status of jobs
     def start(self, sleepTime: int = 60):
@@ -228,7 +228,7 @@ class manager:
         window.title("Falconry monitor")
         frm_counter = tk.Frame()
 
-        def quick_label(name: str, x: int, y: int = 0 ):
+        def quick_label(name: str, x: int, y: int = 0):
             lbl = tk.Label(master=frm_counter, width=10, text=name)
             lbl.grid(row=y, column=x)
             return lbl
@@ -267,7 +267,7 @@ class manager:
 
             # if no job is waiting nor running, finish the manager
             # TODO: add condition (close on finish)
-            #if not (c.waiting + c.notSub + c.idle + c.run > 0):
+            # if not (c.waiting + c.notSub + c.idle + c.run > 0):
             #    window.destroy()
 
             # checking dependencies and submitting ready jobs
