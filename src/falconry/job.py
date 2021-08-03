@@ -60,8 +60,14 @@ class job:
         jobDict = {
             "clusterIDs": self.clusterIDs,
             "config": self.config,
-            "depNames": depNames
+            "depNames": depNames,
+            "done": "false"
         }
+        # to test if job is done takes long time
+        # because log file needs to be checked
+        # so its best to save this status
+        if self.done:
+            jobDict["done"] = "true"
         return jobDict
 
     # define job from dictionary created using the save function
@@ -76,6 +82,10 @@ class job:
 
         # setup flags:
         self.reset()
+        # tmp backwards compatibility
+        if "done" in jobDict and jobDict["done"] == "true":
+            log.debug("Job is already done")
+            self.done = True
 
         # set cluster IDs
         self.clusterIDs = jobDict["clusterIDs"]
@@ -86,7 +96,7 @@ class job:
             self.logFile = self.config["log"].replace("$(ClusterId)", str(self.clusterIDs[-1]))
             self.submitted = True
 
-        self.get_status()
+        #self.get_status()
 
     # reset job flags
     def reset(self) -> None:
@@ -102,7 +112,13 @@ class job:
 
     # submit the job
     # TODO: raise error if problem
-    def submit(self) -> None:
+    def submit(self, force: bool = False) -> None:
+        # force: for cases when the job status was checked
+        # e.g. when retrying 
+        # this is can save a lot of time because
+        # failed job required the log file to be read.
+        # Should not be used by users, only internally.
+
         # first check if job was not submitted before:
         if self.clusterIDs != []:
             status = self.get_status()
@@ -187,9 +203,12 @@ class job:
 
     # get status of the job, as defined in translate.py
     def get_status(self) -> int:
+   
         # First check if the job is skipped or not even submitted
         if self.skipped:
             return 8
+        elif self.done:
+            return 4
         elif self.clusterIDs == []:  # job was not even submitted
             return 9
         elif not os.path.isfile(self.logFile):
@@ -211,6 +230,7 @@ class job:
                                 self.done = True
                                 return 4  # success
 
+                            log.debug(f"Job failed {status}")
                             self.failed = True
                             return -status
                     return 11  # no "Normal termination for Job terminated"
@@ -226,8 +246,9 @@ class job:
             self.config[key] = item
 
     def set_time(self, runTime: int) -> None:
-        self.config["+RequestRuntime"] = str(runTime)
         self.config["+MaxRuntime"] = str(runTime)
+        #TODO: this does not work on UI
+        #self.config["+RequestRuntime"] = str(runTime)
 
     def set_arguments(self, args: str) -> None:
         self.config["arguments"] = args

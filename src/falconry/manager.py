@@ -24,6 +24,7 @@ class counter:
         self.failed = 0
         self.done = 0
         self.skipped = 0
+        self.removed = 0
 
 class manager:
     """ Manager holds all jobs and periodically checks their status.
@@ -145,10 +146,10 @@ class manager:
             log.debug("Job %s has status %s", j.name, translate.statusMessage[status])
         if status == 12:
             log.warning("Error! Job %s (id %s) failed due to condor, rerunning", j.name, j.clusterID)
-            j.submit()
+            j.submit(force=True)
         elif retryFailed and status < 0:
             log.warning("Error! Job %s (id %s) failed and will be retried, rerunning", j.name, j.clusterID)
-            j.submit()
+            j.submit(force=True)
  
 
     # resubmit jobs and find out state of the jobs
@@ -182,6 +183,8 @@ class manager:
                 c.failed += 1
             elif status == 4:
                 c.done += 1
+            elif status == 3:
+                c.removed += 1
 
 
     # start the manager, iteratively checking status of jobs
@@ -197,8 +200,12 @@ class manager:
             self.count_jobs(c)
 
             log.info(
-                "Not sub.: %s | idle: %s | running: %s | failed: %s | done: %s | waiting: %s | skipped: %s",
-                c.notSub, c.idle, c.run, c.failed, c.done, c.waiting, c.skipped
+                "Not sub.: %s | idle: %s | running: %s | failed: %s |",
+                c.notSub, c.idle, c.run, c.failed
+            )
+            log.info(
+                "Done: %s | waiting: %s | skipped: %s | removed: %s |",
+                c.done, c.waiting, c.skipped, c.removed
             )
 
             # if no job is waiting nor running, finish the manager
@@ -233,6 +240,7 @@ class manager:
         quick_label("Done:", 4)
         quick_label("Waiting:", 5)
         quick_label("Skipped:", 6)
+        quick_label("Removed:", 7)
         labels = {}
         labels["ns"] = quick_label("0", 0, 1)
         labels["i"] = quick_label("0", 1, 1)
@@ -241,6 +249,7 @@ class manager:
         labels["d"] = quick_label("0", 4, 1)
         labels["w"] = quick_label("0", 5, 1)
         labels["s"] = quick_label("0", 6, 1)
+        labels["rm"] = quick_label("0",  1)
 
         frm_counter.grid(row=0, column=0)
 
@@ -254,6 +263,7 @@ class manager:
             labels["d"]["text"] = f"{c.done}"
             labels["w"]["text"] = f"{c.waiting}"
             labels["s"]["text"] = f"{c.skipped}"
+            labels["rm"]["text"] = f"{c.removed}"
 
             # if no job is waiting nor running, finish the manager
             # TODO: add condition (close on finish)
