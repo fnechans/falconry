@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 
+import select
+import sys
+import os
 import logging
 from falconry import manager, job
 
 logging.basicConfig(
-    level=logging.INFO, format="--- %(levelname)s (%(name)s): %(message)s"
+    level=logging.INFO, format="%(levelname)s (%(name)s): %(message)s"
 )
 log = logging.getLogger(__name__)
 
@@ -27,6 +30,25 @@ def main():
 
     if cfg.debug:
         logging.getLogger("falconry").setLevel(logging.DEBUG)
+
+    if os.path.exists(cfg.dir) and not cfg.cont:
+        log.warning(f"Manager directory {cfg.dir} already exists!")
+        log.info("Input l to load existing jobs, or x to quit")
+        # timeout after 60 seconds
+        i, o, e = select.select( [sys.stdin], [], [], 60)
+        if i:
+            inp = sys.stdin.readline().strip()
+            if inp == "l":
+                log.info("Continuing jobs")
+                cfg.cont = True
+            elif inp == "n":
+                log.info("Creating new jobs")
+            else:
+                log.info("Quitting")
+                return
+        else:
+            log.info("Quitting")
+            return  
 
     mgr = manager(cfg.dir)  # the argument specifies where the job is saved
 

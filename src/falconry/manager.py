@@ -26,7 +26,9 @@ class counter:
         self.done = 0
         self.skipped = 0
         self.removed = 0
-
+        self.held = 0
+    def __eq__(self, other) : 
+        return self.__dict__ == other.__dict__
 
 class manager:
     """ Manager holds all jobs and periodically checks their status.
@@ -105,6 +107,11 @@ class manager:
         for name, j in self.jobs.items():
             if j.get_status() < 0:
                 log.info("%s (id %u)", name, j.clusterID)
+        # TODO: maybe separate failed and removed?
+        log.info("Printing removed jobs:")
+        for name, j in self.jobs.items():
+            if j.get_status() == 3:
+                log.info("%s (id %u)", name, j.clusterID)
 
     # check all tasks in queue whether the jobs they depend on already finished.
     # If some of them failed, add this task to the skipped.
@@ -152,6 +159,9 @@ class manager:
         elif retryFailed and status < 0:
             log.warning("Error! Job %s (id %s) failed and will be retried, rerunning", j.name, j.clusterID)
             j.submit(force=True)
+        elif retryFailed and status == 3:
+            log.warning("Error! Job %s (id %s) was removed and will be retried, rerunning", j.name, j.clusterID)
+            j.submit(force=True)
 
     # resubmit jobs and find out state of the jobs
     def count_jobs(self, c: counter):
@@ -184,6 +194,8 @@ class manager:
                 c.failed += 1
             elif status == 4:
                 c.done += 1
+            elif status == 5:
+                c.held += 1
             elif status == 3:
                 c.removed += 1
 
@@ -192,36 +204,54 @@ class manager:
         # TODO: maybe add flag to save for each check? or every n-th check?
 
         log.info("MONITOR: START")
+        # For input managment
+        import  select
 
+        c = counter()
         while True:
-            log.info("Checking status of jobs [%s]", str(datetime.datetime.now()))
 
+            cOld = c
             c = counter()
             self.count_jobs(c)
 
-            log.info(
-                "Not sub.: %s | idle: %s | running: %s | failed: %s |",
-                c.notSub, c.idle, c.run, c.failed
-            )
-            log.info(
-                "Done: %s | waiting: %s | skipped: %s | removed: %s |",
-                c.done, c.waiting, c.skipped, c.removed
-            )
+            # only printout if something changed:
+            if c != cOld:
+                log.info("|-Updating status of jobs [%s]-----------|", str(datetime.datetime.now()))
+                log.info(
+                    "| nsub: {0:>4} | hold: {1:>4} | fail: {2:>4} | rem: {3:>5} | skip: {4:>4} |".format(
+                    c.notSub, c.held, c.failed, c.removed, c.skipped)
+                )
+                # log.info("|----------------------------------------------------------------|")
+                log.info(
+                    "| wait: {0:>4} | idle: {1:>4} | RUN: {2:>5} | DONE: {3:>4} | TOT: {4:>5} |".format(
+                    c.waiting, c.idle, c.run, c.done, len(self.jobs))
+                )
 
-            # if no job is waiting nor running, finish the manager
-            if not (c.waiting + c.notSub + c.idle + c.run > 0):
-                break
+                # if no job is waiting nor running, finish the manager
+                if not (c.waiting + c.notSub + c.idle + c.run > 0):
+                    break
 
-            # checking dependencies and submitting ready jobs
-            self.check_dependence()
+                # checking dependencies and submitting ready jobs
+                self.check_dependence()
 
-            sleep(sleepTime)
+                #sleep(sleepTime)
+                # instead of sleeping wait for input
+                log.info("|-Input 'f' to show failed jobs and 'x' to exit------------------|")
+            i, o, e = select.select( [sys.stdin], [], [], sleepTime )
+            if i:
+                inp = sys.stdin.readline().strip()
+                if inp == "f":
+                    self.print_failed()
+                elif inp == "x":
+                    log.info("MONITOR: INTERUPTED")
+                    return
 
         log.info("MONITOR: FINISHED")
 
     # start the manager with gui, iteratively checking status of jobs
     def start_gui(self, sleepTime: int = 60):
 
+        log.warning("GUI version is only experimental!")
         import tkinter as tk
 
         window = tk.Tk()
@@ -292,8 +322,10 @@ class manager:
             log.error("Manager interrupted with keyboard!")
             log.error("Saving and exitting ...")
             self.save()
+            self.print_failed()
             sys.exit(0)
         except Exception:
             traceback.print_exc(file=sys.stdout)
             self.save()
-            sys.exit(0)
+            self.print_failed()
+            sys.exit(1)
