@@ -35,7 +35,7 @@ def main():
         log.warning(f"Manager directory {cfg.dir} already exists!")
         log.info("Input l to load existing jobs, or x to quit")
         # timeout after 60 seconds
-        i, o, e = select.select( [sys.stdin], [], [], 60)
+        i, o, e = select.select([sys.stdin], [], [], 60)
         if i:
             inp = sys.stdin.readline().strip()
             if inp == "l":
@@ -48,7 +48,7 @@ def main():
                 return
         else:
             log.info("Quitting")
-            return  
+            return
 
     mgr = manager(cfg.dir)  # the argument specifies where the job is saved
 

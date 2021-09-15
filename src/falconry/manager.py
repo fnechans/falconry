@@ -5,7 +5,6 @@ import os
 import sys
 import traceback
 import datetime         # so user knowns the time of last check
-from time import sleep  # used for sleep time between checks
 
 from typing import Dict, Any
 
@@ -27,8 +26,10 @@ class counter:
         self.skipped = 0
         self.removed = 0
         self.held = 0
-    def __eq__(self, other) : 
+
+    def __eq__(self, other):
         return self.__dict__ == other.__dict__
+
 
 class manager:
     """ Manager holds all jobs and periodically checks their status.
@@ -205,7 +206,7 @@ class manager:
 
         log.info("MONITOR: START")
         # For input managment
-        import  select
+        import select
 
         c = counter()
         while True:
@@ -219,12 +220,14 @@ class manager:
                 log.info("|-Updating status of jobs [%s]-----------|", str(datetime.datetime.now()))
                 log.info(
                     "| nsub: {0:>4} | hold: {1:>4} | fail: {2:>4} | rem: {3:>5} | skip: {4:>4} |".format(
-                    c.notSub, c.held, c.failed, c.removed, c.skipped)
+                        c.notSub, c.held, c.failed, c.removed, c.skipped
+                    )
                 )
                 # log.info("|----------------------------------------------------------------|")
                 log.info(
                     "| wait: {0:>4} | idle: {1:>4} | RUN: {2:>5} | DONE: {3:>4} | TOT: {4:>5} |".format(
-                    c.waiting, c.idle, c.run, c.done, len(self.jobs))
+                        c.waiting, c.idle, c.run, c.done, len(self.jobs)
+                    )
                 )
 
                 # if no job is waiting nor running, finish the manager
@@ -234,10 +237,9 @@ class manager:
                 # checking dependencies and submitting ready jobs
                 self.check_dependence()
 
-                #sleep(sleepTime)
                 # instead of sleeping wait for input
                 log.info("|-Input 'f' to show failed jobs and 'x' to exit------------------|")
-            i, o, e = select.select( [sys.stdin], [], [], sleepTime )
+            i, o, e = select.select([sys.stdin], [], [], sleepTime)
             if i:
                 inp = sys.stdin.readline().strip()
                 if inp == "f":
