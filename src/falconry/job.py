@@ -174,7 +174,7 @@ class job:
         # TODO: add more to projection
         if ads == []:
             for ad in self.schedd.history(
-                requirements=constr,
+                constraint=constr,
                 projection=["JobStatus"]
             ):
                 return ad

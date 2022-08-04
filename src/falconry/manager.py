@@ -64,15 +64,17 @@ class manager:
         self.jobs[j.name] = j
 
     # save current status
-    def save(self):
-        log.info("Saving current status of jobs")
+    def save(self, quiet = False):
+        if not quiet:
+            log.info("Saving current status of jobs")
         output: Dict[str, Any] = {}
         for name, j in self.jobs.items():
             output[name] = j.save()
 
         with open(self.dir+"/data.json", "w") as f:
             json.dump(output, f)
-            log.info("Success!")
+            if not quiet:
+                log.info("Success!")
 
     # load saved jobs
     def load(self, retryFailed: bool = False):
@@ -211,13 +213,14 @@ class manager:
         c = counter()
         while True:
 
+            log.info("|-Checking status of jobs [%s]-----------|", str(datetime.datetime.now()))
+
             cOld = c
             c = counter()
             self.count_jobs(c)
 
             # only printout if something changed:
             if c != cOld:
-                log.info("|-Updating status of jobs [%s]-----------|", str(datetime.datetime.now()))
                 log.info(
                     "| nsub: {0:>4} | hold: {1:>4} | fail: {2:>4} | rem: {3:>5} | skip: {4:>4} |".format(
                         c.notSub, c.held, c.failed, c.removed, c.skipped
@@ -236,6 +239,7 @@ class manager:
 
                 # checking dependencies and submitting ready jobs
                 self.check_dependence()
+                self.save(quiet=True)
 
                 # instead of sleeping wait for input
                 log.info("|-Input 'f' to show failed jobs and 'x' to exit------------------|")
