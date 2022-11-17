@@ -165,6 +165,9 @@ class manager:
         elif retryFailed and status == 3:
             log.warning("Error! Job %s (id %s) was removed and will be retried, rerunning", j.name, j.clusterID)
             j.submit(force=True)
+        elif retryFailed and (status == 9 or status == 10):
+            log.warning("Error! Job %s was not submitted succesfully (probably...), rerunning", j.name)
+            j.submit(force=True)
 
     # resubmit jobs and find out state of the jobs
     def count_jobs(self, c: counter):
@@ -331,6 +334,7 @@ class manager:
             self.print_failed()
             sys.exit(0)
         except Exception:
+            log.error("Error ocurred when running manager!")
             traceback.print_exc(file=sys.stdout)
             self.save()
             self.print_failed()
