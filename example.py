@@ -64,8 +64,9 @@ def main():
         j.set_time(120)
         return j
 
-    # if --cont command line argument called, load previous job
-    # otherwise create jobs
+    # if --cont command line argument called or user confirmed
+    # loading for existing `cfg.dir` above, load previous jobs
+    # otherwise create new jobs
     if cfg.cont:
         mgr.load()
     else:
@@ -94,9 +95,9 @@ def main():
     # start the manager
     # if there is an error, especially interupt with keyboard,
     # saves the current state of jobs
-    mgr.start_safe(60, gui=False)  # argument is interval between checking of the jobs
-    mgr.print_failed()
+    mgr.start(60, gui=False)  # argument is interval between checking of the jobs
     mgr.save()
+    mgr.print_failed()
 
 
 if __name__ == "__main__":
