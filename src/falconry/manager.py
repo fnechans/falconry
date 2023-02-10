@@ -76,7 +76,8 @@ class manager:
             if not quiet:
                 log.info("Success!")
 
-    # load saved jobs
+    # load saved jobs and retry those that failed
+    # when `retryFailed` is true
     def load(self, retryFailed: bool = False):
         log.info("Loading past status of jobs")
         with open(self.dir+"/data.json", "r") as f:
@@ -95,14 +96,32 @@ class manager:
                 # decorate the list of names of the dependencies
                 depNames[j.name] = jobDict["depNames"]
 
-            # now that jobs are defined, dependencies can be recreated
-            # also resubmit jobs which failed
-            for j in self.jobs.values():
-                dependencies = [self.jobs[name] for name in depNames[j.name]]
-                j.add_job_dependency(*dependencies)
+        # Now that jobs are defined, dependencies can be recreated
+        # also resubmit jobs which failed
+        for j in self.jobs.values():
+            dependencies = [self.jobs[name] for name in depNames[j.name]]
+            j.add_job_dependency(*dependencies)
 
-                if retryFailed:
+        # Retry failed jobs
+        # Since this changes the status and submits
+        # jobs, add safequard in case of crash
+        # to save up-to-date state
+        if retryFailed:
+            try:
+                for j in self.jobs.values():
                     self.check_resubmit(j, True)
+            except KeyboardInterrupt:
+                log.error("Manager interrupted with keyboard!")
+                log.error("Saving and exitting ...")
+                self.save()
+                self.print_failed()
+                sys.exit(0)
+            except Exception:
+                log.error("Error ocurred when running manager!")
+                traceback.print_exc(file=sys.stdout)
+                self.save()
+                self.print_failed()
+                sys.exit(1)
 
     # print names of all failed jobs
     def print_failed(self):
@@ -165,7 +184,7 @@ class manager:
         elif retryFailed and status == 3:
             log.warning("Error! Job %s (id %s) was removed and will be retried, rerunning", j.name, j.clusterID)
             j.submit(force=True)
-        elif retryFailed and (status == 9 or status == 10):
+        elif retryFailed and j.submitted and (status == 9 or status == 10):
             log.warning("Error! Job %s was not submitted succesfully (probably...), rerunning", j.name)
             j.submit(force=True)
 
@@ -206,7 +225,7 @@ class manager:
                 c.removed += 1
 
     # start the manager, iteratively checking status of jobs
-    def start(self, sleepTime: int = 60):
+    def start_cli(self, sleepTime: int = 60):
         # TODO: maybe add flag to save for each check? or every n-th check?
 
         log.info("MONITOR: START")
@@ -321,12 +340,12 @@ class manager:
 
     # if there is an error, especially interupt with keyboard,
     # save the current state of jobs
-    def start_safe(self, sleepTime: int = 60, gui: bool = False):
+    def start(self, sleepTime: int = 60, gui: bool = False):
         try:
             if gui:
                 self.start_gui(sleepTime)
             else:
-                self.start(sleepTime)  # argument is interval between checking of the jobs
+                self.start_cli(sleepTime)  # argument is interval between checking of the jobs
         except KeyboardInterrupt:
             log.error("Manager interrupted with keyboard!")
             log.error("Saving and exitting ...")
@@ -339,3 +358,11 @@ class manager:
             self.save()
             self.print_failed()
             sys.exit(1)
+
+    # out-dated soon to be removed start_safe (now just start)
+    def start_safe(self, sleepTime: int = 60, gui: bool = False):
+        log.warning("IMPORTANT! `start_safe` is now remind as `start`. "
+                    "Change your scripts as `start_safe` will be removed "
+                    "in next version!")
+        self.start_safe(sleepTime, gui)
+    
