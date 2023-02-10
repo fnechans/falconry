@@ -64,7 +64,7 @@ class manager:
         self.jobs[j.name] = j
 
     # save current status
-    def save(self, quiet = False):
+    def save(self, quiet: bool = False):
         if not quiet:
             log.info("Saving current status of jobs")
         output: Dict[str, Any] = {}
@@ -365,4 +365,3 @@ class manager:
                     "Change your scripts as `start_safe` will be removed "
                     "in next version!")
         self.start_safe(sleepTime, gui)
-    

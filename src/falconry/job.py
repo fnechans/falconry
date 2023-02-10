@@ -194,10 +194,6 @@ class job:
 
         return ads[0]  # we take only single job, so return onl the first eleement
 
-    # get condor status of the job
-    def get_condor_status(self) -> int:
-        return self.get_info()["JobStatus"]
-
     # get status of the job, as defined in translate.py
     def get_status(self) -> int:
 
@@ -211,32 +207,50 @@ class job:
         elif not os.path.isfile(self.logFile):
             return 10
 
-        cndr_status = self.get_condor_status()
-        # If job complete, check if with error:
-        if cndr_status == 4 or cndr_status == -999:
-            with open(self.logFile) as fl:
-                search = fl.read()
-                if "Job terminated" in search:
-                    searchSplit = search.split("\n")
-                    for line in searchSplit:
-                        line = line.rstrip()  # remove '\n' at end of line
-                        if "Normal termination (return value" in line:
-                            status = int(line.split("value")[1].strip()[:-1])
+        cndr_status = self._get_status_condor()
+        # If job is incomplete, simply return the status:
+        if cndr_status != 4 and cndr_status != -999:
+            return cndr_status
 
-                            if status == 0:
-                                self.done = True
-                                return 4  # success
+        # Otherwise detemine status from log file
+        return self._get_status_log()
 
-                            log.debug(f"Job failed {status}")
-                            self.failed = True
-                            return -status
-                    return 11  # no "Normal termination for Job terminated"
-                elif "Job was aborted by the user" in search:
-                    # I think this is the same as 3 but need to check
-                    return 12
-                else:
-                    log.error("Uknown output of job %s!", self.name)
-        return cndr_status
+    # get condor status of the job
+    def _get_status_condor(self) -> int:
+        return self.get_info()["JobStatus"]
+
+    def _get_status_log(self) -> int:
+        # Check log file to determine if job finished with an error
+        with open(self.logFile) as fl:
+            search = fl.read()
+
+        # User abortion is special case
+        if "Job was aborted by the user" in search:
+            # I think this is the same as 3 but need to check
+            return 12
+
+        # Otherwise check `"Job terminated"`. If the log does not contain it
+        # its unknown state
+        if "Job terminated" not in search:
+            log.error("Uknown output of job %s!", self.name)
+
+        # Evaluate `"Job terminated"`
+        searchSplit = search.split("\n")
+        for line in searchSplit:
+            line = line.rstrip()  # remove '\n' at end of line
+            if "Normal termination (return value" in line:
+                status = int(line.split("value")[1].strip()[:-1])
+
+                if status == 0:
+                    self.done = True
+                    return 4  # success
+
+                log.debug(f"Job failed {status}")
+                self.failed = True
+                # Positive  values reserved for falconry states,
+                # so return as negative
+                return -status
+        return 11  # no "Normal termination for Job terminated"
 
     def set_custom(self, dict: Dict[str, str]) -> None:
         for key, item in dict.items():
