@@ -364,4 +364,4 @@ class manager:
         log.warning("IMPORTANT! `start_safe` is now remind as `start`. "
                     "Change your scripts as `start_safe` will be removed "
                     "in next version!")
-        self.start_safe(sleepTime, gui)
+        self.start(sleepTime, gui)
