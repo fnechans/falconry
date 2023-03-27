@@ -229,10 +229,16 @@ class job:
             # I think this is the same as 3 but need to check
             return 12
 
+        # Sometimes `removed` is not properly saved
+        # (probably when continuing after long time?)
+        # so here alternative way
+        if "SYSTEM_PERIODIC_REMOVE" in search:
+            return 3
+
         # Otherwise check `"Job terminated"`. If the log does not contain it
         # its unknown state
         if "Job terminated" not in search:
-            log.error("Uknown output of job %s!", self.name)
+            log.error("Unknown output of job %s!", self.name)
 
         # Evaluate `"Job terminated"`
         searchSplit = search.split("\n")

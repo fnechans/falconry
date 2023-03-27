@@ -2,6 +2,7 @@ import htcondor  # for submitting jobs, querying HTCondor daemons, etc.
 import logging
 import json
 import os
+import shutil
 import sys
 import traceback
 import datetime         # so user knowns the time of last check
@@ -38,9 +39,10 @@ class manager:
     submitting jobs when all dependencies are satisfied.
     These are handled as decorations of the job.
     """
+    reservedNames = ["Message"]
 
     # Initialize the manager, maily getting the htcondor schedd
-    def __init__(self, mgrDir):
+    def __init__(self, mgrDir, mgrMsg = ""):
         log.info("MONITOR: INIT")
 
         #  get the schedd
@@ -53,11 +55,15 @@ class manager:
         if not os.path.exists(mgrDir):
             os.makedirs(mgrDir)
         self.dir = mgrDir
+        self.mgrMsg = mgrMsg
 
     # add a job to the manager
     def add_job(self, j: job.job):
         # first check if the jobs already exists
         if j.name in self.jobs.keys():
+            log.error("Job %s already exists! Exiting ...", j.name)
+            raise SystemExit
+        if j.name in manager.reservedNames:
             log.error("Job %s already exists! Exiting ...", j.name)
             raise SystemExit
 
@@ -67,14 +73,32 @@ class manager:
     def save(self, quiet: bool = False):
         if not quiet:
             log.info("Saving current status of jobs")
-        output: Dict[str, Any] = {}
+        output: Dict[str, Any] = {
+            "Message" : self.mgrMsg
+        }
         for name, j in self.jobs.items():
             output[name] = j.save()
 
-        with open(self.dir+"/data.json", "w") as f:
+        # save with a timestamp as a suffix, create sym link
+        fileSym = self.dir+"/data.json"
+        current_time = datetime.datetime.now().strftime("%Y%m%d_%H%M_%S")
+        fileName = f"{fileSym}.latest"
+        fileSuf = f"{fileSym}.{current_time}" # only if not quiet
+
+        with open(fileName, "w") as f:
             json.dump(output, f)
             if not quiet:
-                log.info("Success!")
+                log.info("Success! Making copy with time-stamp.")
+                if not os.path.exists(fileSuf):
+                    shutil.copyfile(fileName, fileSuf)
+                else:
+                    raise FileExistsError(f"Destination file {fileSuf} already exists."
+                                           " This should not be possible.")
+
+        # not necessary to remove, but maybe better to be sure its not broken
+        if os.path.exists(fileSym):
+            os.remove(fileSym)
+        os.symlink(fileName, fileSym)
 
     # load saved jobs and retry those that failed
     # when `retryFailed` is true
