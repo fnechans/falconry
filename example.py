@@ -16,7 +16,6 @@ log = logging.getLogger(__name__)
 def config():
     import argparse
     parser = argparse.ArgumentParser(description="Falconry. Read README!")
-    parser.add_argument("--cont", action="store_true", help="Load jobs from previous iteration and continue")
     parser.add_argument("--debug", action="store_true", help="Debug mode with more verbose printout")
     parser.add_argument("--dir", type=str, help="Path to output DIR. Output by default.", default="Output")
     return parser.parse_args()
@@ -31,26 +30,21 @@ def main():
     if cfg.debug:
         logging.getLogger("falconry").setLevel(logging.DEBUG)
 
-    if os.path.exists(cfg.dir) and not cfg.cont:
-        log.warning(f"Manager directory {cfg.dir} already exists!")
-        log.info("Input l to load existing jobs, or x to quit")
-        # timeout after 60 seconds
-        i, o, e = select.select([sys.stdin], [], [], 60)
-        if i:
-            inp = sys.stdin.readline().strip()
-            if inp == "l":
-                log.info("Continuing jobs")
-                cfg.cont = True
-            elif inp == "n":
-                log.info("Creating new jobs")
-            else:
-                log.info("Quitting")
-                return
-        else:
-            log.info("Quitting")
-            return
 
     mgr = manager(cfg.dir)  # the argument specifies where the job is saved
+
+    # Check if manager was already run in given dir and ask user
+    # if they want to load previous instance
+    # First return value if user typed reasonable input (quite if not)
+    # Second is the actual value, possible are 'l' to load
+    # and 'n' for new right now
+    load = False
+    status, var = mgr.check_savefile_status()
+    if status == True:
+        if var == "l":
+            load = True
+    else:
+        return
 
     # short function to simplify the job setup
     def simple_job(name: str, exe: str) -> job:
@@ -64,10 +58,7 @@ def main():
         j.set_time(120)
         return j
 
-    # if --cont command line argument called or user confirmed
-    # loading for existing `cfg.dir` above, load previous jobs
-    # otherwise create new jobs
-    if cfg.cont:
+    if load:
         mgr.load()
     else:
         # as a test, prepare one job which succeeds and one that fails

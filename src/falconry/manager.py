@@ -7,10 +7,11 @@ import sys
 import traceback
 import datetime         # so user knowns the time of last check
 
-from typing import Dict, Any
+from typing import Dict, Any, Tuple, Optional
 
 from . import job
 from . import translate
+from . import cli
 
 log = logging.getLogger(__name__)
 
@@ -55,17 +56,40 @@ class manager:
         if not os.path.exists(mgrDir):
             os.makedirs(mgrDir)
         self.dir = mgrDir
+        self.saveFileName = self.dir+"/data.json"
         self.mgrMsg = mgrMsg
 
+    # check if save file already exists
+    def check_savefile_status(self) -> Tuple[bool, Optional[str]]:
+        if os.path.exists(self.saveFileName):
+            log.warning(f"Manager directory {self.dir} already exists!")
+            state, var = cli.input_checker({
+                "l" : "Load existing jobs",
+                "n" : "Start new jobs"})
+
+            # Simplify the output for user interface
+            # both unknown/timeout have the same result
+            if state == cli.InputState.SUCCESS:
+                return True, var
+            else:
+                return False, var
+
+
     # add a job to the manager
-    def add_job(self, j: job.job):
+    def add_job(self, j: job.job, update: bool = False):
+        # some reserved names, to simplify saving later
+        if j.name in manager.reservedNames:
+            log.error("Name %s  is reserved! Exiting ...", j.name)
+            raise SystemExit
+
         # first check if the jobs already exists
         if j.name in self.jobs.keys():
-            log.error("Job %s already exists! Exiting ...", j.name)
-            raise SystemExit
-        if j.name in manager.reservedNames:
-            log.error("Job %s already exists! Exiting ...", j.name)
-            raise SystemExit
+            if not update:
+                log.error("Job %s already exists! Exiting ...", j.name)
+                raise SystemExit
+            else:
+                # TODO: update old style string to f-strings?
+                log.info(f"Updating job {j.name}.")
 
         self.jobs[j.name] = j
 
@@ -80,25 +104,24 @@ class manager:
             output[name] = j.save()
 
         # save with a timestamp as a suffix, create sym link
-        fileSym = self.dir+"/data.json"
         current_time = datetime.datetime.now().strftime("%Y%m%d_%H%M_%S")
-        fileName = f"{fileSym}.latest"
-        fileSuf = f"{fileSym}.{current_time}" # only if not quiet
+        fileLatest = f"{self.saveFileName}.latest"
+        fileSuf = f"{self.saveFileName}.{current_time}" # only if not quiet
 
-        with open(fileName, "w") as f:
+        with open(fileLatest, "w") as f:
             json.dump(output, f)
             if not quiet:
                 log.info("Success! Making copy with time-stamp.")
                 if not os.path.exists(fileSuf):
-                    shutil.copyfile(fileName, fileSuf)
+                    shutil.copyfile(fileLatest, fileSuf)
                 else:
                     raise FileExistsError(f"Destination file {fileSuf} already exists."
                                            " This should not be possible.")
 
         # not necessary to remove, but maybe better to be sure its not broken
-        if os.path.exists(fileSym):
-            os.remove(fileSym)
-        os.symlink(fileName, fileSym)
+        if os.path.exists(self.saveFileName):
+            os.remove(self.saveFileName)
+        os.symlink(fileLatest.split("/")[-1], self.saveFileName)
 
     # load saved jobs and retry those that failed
     # when `retryFailed` is true
@@ -108,6 +131,8 @@ class manager:
             input = json.load(f)
             depNames = {}
             for name, jobDict in input.items():
+                if name in manager.reservedNames:
+                    continue
                 log.debug("Loading job %s", name)
 
                 # create a job
@@ -115,7 +140,7 @@ class manager:
                 j.load(jobDict)
 
                 # add it to the manager
-                self.add_job(j)
+                self.add_job(j, update=True)
 
                 # decorate the list of names of the dependencies
                 depNames[j.name] = jobDict["depNames"]
@@ -289,14 +314,21 @@ class manager:
 
                 # instead of sleeping wait for input
                 log.info("|-Input 'f' to show failed jobs and 'x' to exit------------------|")
-            i, o, e = select.select([sys.stdin], [], [], sleepTime)
-            if i:
-                inp = sys.stdin.readline().strip()
-                if inp == "f":
+                log.info("|-Input 'retry all' to retry all failed jobs---------------------|")
+
+            state, var = cli.input_checker({
+                "f" : "",
+                "x" : "",
+                "retry all" : ""}, silent=True)
+            if state == cli.InputState.SUCCESS:
+                if var == "f":
                     self.print_failed()
-                elif inp == "x":
+                elif var == "x":
                     log.info("MONITOR: INTERUPTED")
                     return
+                elif var == "retry all":
+                    for j in self.jobs.values():
+                        self.check_resubmit(j, True)
 
         log.info("MONITOR: FINISHED")
 
@@ -376,9 +408,9 @@ class manager:
             self.save()
             self.print_failed()
             sys.exit(0)
-        except Exception:
+        except Exception as e:
             log.error("Error ocurred when running manager!")
-            traceback.print_exc(file=sys.stdout)
+            log.error(str(e))
             self.save()
             self.print_failed()
             sys.exit(1)

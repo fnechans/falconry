@@ -232,7 +232,7 @@ class job:
         # Sometimes `removed` is not properly saved
         # (probably when continuing after long time?)
         # so here alternative way
-        if "SYSTEM_PERIODIC_REMOVE" in search:
+        if "SYSTEM_PERIODIC_REMOVE" in search or "Job was aborted" in search:
             return 3
 
         # Otherwise check `"Job terminated"`. If the log does not contain it
