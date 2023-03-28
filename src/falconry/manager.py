@@ -43,7 +43,7 @@ class manager:
     reservedNames = ["Message"]
 
     # Initialize the manager, maily getting the htcondor schedd
-    def __init__(self, mgrDir, mgrMsg = ""):
+    def __init__(self, mgrDir: str, mgrMsg: str = ""):
         log.info("MONITOR: INIT")
 
         #  get the schedd
@@ -64,15 +64,15 @@ class manager:
         if os.path.exists(self.saveFileName):
             log.warning(f"Manager directory {self.dir} already exists!")
             state, var = cli.input_checker({
-                "l" : "Load existing jobs",
-                "n" : "Start new jobs"})
+                "l": "Load existing jobs",
+                "n": "Start new jobs"})
 
             # Simplify the output for user interface
             # both unknown/timeout have the same result
             if state == cli.InputState.SUCCESS:
                 return True, var
-            else:
-                return False, var
+            return False, var
+        return True, "n" # automatically assume new
 
     # ask for custom meesage
     def ask_for_message(self):
@@ -104,7 +104,7 @@ class manager:
         if not quiet:
             log.info("Saving current status of jobs")
         output: Dict[str, Any] = {
-            "Message" : self.mgrMsg
+            "Message": self.mgrMsg
         }
         for name, j in self.jobs.items():
             output[name] = j.save()
@@ -112,7 +112,7 @@ class manager:
         # save with a timestamp as a suffix, create sym link
         current_time = datetime.datetime.now().strftime("%Y%m%d_%H%M_%S")
         fileLatest = f"{self.saveFileName}.latest"
-        fileSuf = f"{self.saveFileName}.{current_time}" # only if not quiet
+        fileSuf = f"{self.saveFileName}.{current_time}"  # only if not quiet
 
         with open(fileLatest, "w") as f:
             json.dump(output, f)
@@ -121,8 +121,8 @@ class manager:
                 if not os.path.exists(fileSuf):
                     shutil.copyfile(fileLatest, fileSuf)
                 else:
-                    raise FileExistsError(f"Destination file {fileSuf} already exists."
-                                           " This should not be possible.")
+                    raise FileExistsError(f"Destination file {fileSuf} already exists. "
+                                          "This should not be possible.")
 
         # not necessary to remove, but maybe better to be sure its not broken
         if os.path.exists(self.saveFileName):
@@ -284,8 +284,6 @@ class manager:
         # TODO: maybe add flag to save for each check? or every n-th check?
 
         log.info("MONITOR: START")
-        # For input managment
-        import select
 
         c = counter()
         while True:
@@ -323,9 +321,9 @@ class manager:
                 log.info("|-Input 'retry all' to retry all failed jobs---------------------|")
 
             state, var = cli.input_checker({
-                "f" : "",
-                "x" : "",
-                "retry all" : ""}, silent=True)
+                "f": "",
+                "x": "",
+                "retry all": ""}, silent=True)
             if state == cli.InputState.SUCCESS:
                 if var == "f":
                     self.print_failed()

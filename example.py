@@ -1,8 +1,5 @@
 #!/usr/bin/env python3
 
-import select
-import sys
-import os
 import logging
 from falconry import manager, job
 
@@ -30,7 +27,6 @@ def main():
     if cfg.debug:
         logging.getLogger("falconry").setLevel(logging.DEBUG)
 
-
     mgr = manager(cfg.dir)  # the argument specifies where the job is saved
 
     # Check if manager was already run in given dir and ask user
@@ -40,7 +36,7 @@ def main():
     # and 'n' for new right now
     load = False
     status, var = mgr.check_savefile_status()
-    if status == True:
+    if status:
         if var == "l":
             load = True
     else:

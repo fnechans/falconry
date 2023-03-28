@@ -1,4 +1,3 @@
-import os
 import sys
 import select
 import logging
@@ -7,6 +6,7 @@ from typing import Dict, Optional, Tuple
 
 log = logging.getLogger(__name__)
 
+
 # helper class to define the status
 class InputState(Enum):
     UNKNOWN = -1
@@ -14,9 +14,9 @@ class InputState(Enum):
     TIMEOUT = 1
 
 
-def input_checker(validOptions : Dict[str, str], timeout : int = 60,
-                  message : str = "Following options available:",
-                  silent = False ) -> Tuple[InputState, Optional[str]] :
+def input_checker(validOptions: Dict[str, str], timeout: int = 60,
+                  message: str = "Following options available:",
+                  silent: bool = False) -> Tuple[InputState, Optional[str]]:
 
     if message != "" and not silent:
         log.info(message)
@@ -38,4 +38,3 @@ def input_checker(validOptions : Dict[str, str], timeout : int = 60,
         if not silent:
             log.info("Timed out ...")
         return InputState.TIMEOUT, None
-
