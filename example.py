@@ -46,6 +46,10 @@ def main():
     else:
         return
 
+    # Ask for message to be saved in the save file
+    # Alwayas good to have some documentation ...
+    mgr.ask_for_message()
+
     # short function to simplify the job setup
     def simple_job(name: str, exe: str) -> job:
         # define job and pass the HTCondor schedd to it

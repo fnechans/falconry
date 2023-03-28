@@ -74,6 +74,12 @@ class manager:
             else:
                 return False, var
 
+    # ask for custom meesage
+    def ask_for_message(self):
+        import select
+        i, o, e = select.select([sys.stdin], [], [], 60)
+        if i:
+            self.mgrMsg = sys.stdin.readline().strip()
 
     # add a job to the manager
     def add_job(self, j: job.job, update: bool = False):
