@@ -40,7 +40,7 @@ class manager:
     submitting jobs when all dependencies are satisfied.
     These are handled as decorations of the job.
     """
-    reservedNames = ["Message"]
+    reservedNames = ["Message", "Command"]
 
     # Initialize the manager, maily getting the htcondor schedd
     def __init__(self, mgrDir: str, mgrMsg: str = ""):
@@ -58,6 +58,7 @@ class manager:
         self.dir = mgrDir
         self.saveFileName = self.dir+"/data.json"
         self.mgrMsg = mgrMsg
+        self.command = " ".join(sys.argv)
 
     # check if save file already exists
     def check_savefile_status(self) -> Tuple[bool, Optional[str]]:
@@ -104,7 +105,8 @@ class manager:
         if not quiet:
             log.info("Saving current status of jobs")
         output: Dict[str, Any] = {
-            "Message": self.mgrMsg
+            "Message": self.mgrMsg,
+            "Command": self.command,
         }
         for name, j in self.jobs.items():
             output[name] = j.save()
