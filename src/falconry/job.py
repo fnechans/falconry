@@ -5,6 +5,7 @@ import logging
 from typing import List, Dict, Any
 
 from . import translate
+from .schedd_wrapper import ScheddWrapper
 
 log = logging.getLogger(__name__)
 
@@ -20,7 +21,7 @@ class job:
     """
 
     # Define the job by its name and add a schedd
-    def __init__(self, name: str, schedd: htcondor.Schedd) -> None:
+    def __init__(self, name: str, schedd: ScheddWrapper) -> None:
 
         # first, define schedd
         self.schedd = schedd

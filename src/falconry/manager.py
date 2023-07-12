@@ -1,4 +1,3 @@
-import htcondor  # for submitting jobs, querying HTCondor daemons, etc.
 import logging
 import json
 import os
@@ -9,9 +8,10 @@ import datetime         # so user knowns the time of last check
 
 from typing import Dict, Any, Tuple, Optional
 
-from . import job
+from .job import job
 from . import translate
 from . import cli
+from .schedd_wrapper import ScheddWrapper
 
 log = logging.getLogger(__name__)
 
@@ -47,10 +47,10 @@ class manager:
         log.info("MONITOR: INIT")
 
         #  get the schedd
-        self.schedd = htcondor.Schedd()
+        self.schedd = ScheddWrapper()
 
         # job collection
-        self.jobs: Dict[str, job.job] = {}
+        self.jobs: Dict[str, job] = {}
 
         # now create a directory where the info about jobs will be save
         if not os.path.exists(mgrDir):
@@ -72,7 +72,7 @@ class manager:
             if state == cli.InputState.SUCCESS:
                 return True, var
             return False, var
-        return True, "n" # automatically assume new
+        return True, "n"  # automatically assume new
 
     # ask for custom meesage
     def ask_for_message(self):
@@ -82,7 +82,7 @@ class manager:
             self.mgrMsg = sys.stdin.readline().strip()
 
     # add a job to the manager
-    def add_job(self, j: job.job, update: bool = False):
+    def add_job(self, j: job, update: bool = False):
         # some reserved names, to simplify saving later
         if j.name in manager.reservedNames:
             log.error("Name %s  is reserved! Exiting ...", j.name)
@@ -142,7 +142,7 @@ class manager:
                 log.debug("Loading job %s", name)
 
                 # create a job
-                j = job.job(name, self.schedd)
+                j = job(name, self.schedd)
                 j.load(jobDict)
 
                 # add it to the manager
@@ -226,7 +226,7 @@ class manager:
                 j.submit()
 
     # check if some job should be resubmitted
-    def check_resubmit(self, j: job.job, retryFailed: bool = False):
+    def check_resubmit(self, j: job, retryFailed: bool = False):
         status = j.get_status()
         if status > 0:
             log.debug("Job %s has status %s", j.name, translate.statusMessage[status])
@@ -246,38 +246,50 @@ class manager:
     # resubmit jobs and find out state of the jobs
     def count_jobs(self, c: counter):
 
-        for j in self.jobs.values():
+        maxLength = 0
+        for name, j in self.jobs.items():
+            printStr = f"Checking {name}\t\t\t\t\t\t\r"
+            if len(printStr) > maxLength:
+                maxLength = len(printStr)
+            print(printStr, end='')
 
-            # evaluate jobs which are not submitted, skipped or done
-            if j.skipped:
-                c.skipped += 1
-                continue
-            elif not j.submitted:
-                c.waiting += 1
-                continue
-            elif j.done:
-                c.done += 1
-                continue
+            self.count_job(c, j)
 
-            #  resubmit jobs which failed due to condor problems
-            self.check_resubmit(j)
+            print(" "*maxLength+"\r", flush=True, end='')
 
-            # count jobs with different statuses
-            status = j.get_status()
-            if status == 9 or status == 10:
-                c.notSub += 1
-            elif status == 1:
-                c.idle += 1
-            elif status == 2:
-                c.run += 1
-            elif status < 0:
-                c.failed += 1
-            elif status == 4:
-                c.done += 1
-            elif status == 5:
-                c.held += 1
-            elif status == 3:
-                c.removed += 1
+    # resubmit jobs and find out state of a job
+    def count_job(self, c: counter, j: job):
+
+        # first check if job is not submitted, skipped or done
+        if j.skipped:
+            c.skipped += 1
+            return
+        if not j.submitted:
+            c.waiting += 1
+            return
+        if j.done:
+            c.done += 1
+            return
+
+        #  resubmit job which failed due to condor problems
+        self.check_resubmit(j)
+
+        # count job with different status
+        status = j.get_status()
+        if status == 9 or status == 10:
+            c.notSub += 1
+        elif status == 1:
+            c.idle += 1
+        elif status == 2:
+            c.run += 1
+        elif status < 0:
+            c.failed += 1
+        elif status == 4:
+            c.done += 1
+        elif status == 5:
+            c.held += 1
+        elif status == 3:
+            c.removed += 1
 
     # start the manager, iteratively checking status of jobs
     def start_cli(self, sleepTime: int = 60):
@@ -301,7 +313,6 @@ class manager:
                         c.notSub, c.held, c.failed, c.removed, c.skipped
                     )
                 )
-                # log.info("|----------------------------------------------------------------|")
                 log.info(
                     "| wait: {0:>4} | idle: {1:>4} | RUN: {2:>5} | DONE: {3:>4} | TOT: {4:>5} |".format(
                         c.waiting, c.idle, c.run, c.done, len(self.jobs)
@@ -323,7 +334,8 @@ class manager:
             state, var = cli.input_checker({
                 "f": "",
                 "x": "",
-                "retry all": ""}, silent=True)
+                "retry all": ""}, silent=True,
+                timeout=sleepTime)
             if state == cli.InputState.SUCCESS:
                 if var == "f":
                     self.print_failed()
@@ -421,7 +433,7 @@ class manager:
 
     # out-dated soon to be removed start_safe (now just start)
     def start_safe(self, sleepTime: int = 60, gui: bool = False):
-        log.warning("IMPORTANT! `start_safe` is now remind as `start`. "
+        log.warning("IMPORTANT! `start_safe` is now renamed as `start`. "
                     "Change your scripts as `start_safe` will be removed "
                     "in next version!")
         self.start(sleepTime, gui)
