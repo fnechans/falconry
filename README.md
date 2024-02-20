@@ -10,7 +10,7 @@
 
 ## Introduction
 
-Falconry is lightweight python package to create and manage your [HTCondor](https://github.com/htcondor/) jobs. 
+Falconry is lightweight python package to create and manage your [HTCondor](https://github.com/htcondor/) jobs.
 
 Detailed documentation can be found on [ReadTheDocs](https://falconry.readthedocs.io/en/latest/index.html). You can also check `example.py` for an example of usage. Package has to be first installed using pip as described in section on [installation](#installation).
 
@@ -26,12 +26,8 @@ Then you can include the package in your project simply by adding:
 
 ### Installing python3 API for HTCondor
 
-The package  requires htcondor API to run. However, the dependency cannot be linked directly because the condor version depends on the version of htcondor your cluster uses.
+The package  requires htcondor API to run. One can simply do:
 
-To install the python API for condor, first figure out the version of the htcondor your cluster runs on:
+    $ python3 -m pip  install --user -r requirements.txt
 
-    $ condor_version
-
-which returns condor version in form X.Y.Z . Then install htcondor using pip
-
-    $ python3 -m pip  install --user htcondor==X.Y.Z
+though it might be better to install in virtual environment.
