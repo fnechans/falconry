@@ -4,13 +4,9 @@ Installation
 
 The package  requires htcondor API to run. However, the dependency cannot be linked directly because the condor version depends on the version of htcondor your cluster uses.
 
-To install the python API for condor, first figure out the version of the htcondor your cluster runs on: ::
+To install the python API for condor using pip: ::
 
-    $ condor_version
-
-which returns condor version in form X.Y.Z . Then install htcondor using pip::
-
-    $ python3 -m pip install --user htcondor==X.Y.Z
+    $ python3 -m pip install --user requirements.txt
 
 To install falconry, simply call following in the repository directory: ::
 
