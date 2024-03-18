@@ -36,16 +36,10 @@ class job:
         self.dependencies: List["job"] = []
 
         # configuration of the jobs
-        self.config = None
+        self.config: Dict[str, str] = {}
 
         # to setup initial state (done/submitted and so on)
         self.reset()
-
-        # actual HTCondor job
-        self.htjob = None
-
-        # log file, important for figuring out run state
-        self.logFile = None
 
     # set up a simple job with only executable and a path to log files
     def set_simple(self, exe: str, logPath: str):
