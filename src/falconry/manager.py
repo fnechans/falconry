@@ -43,7 +43,7 @@ class manager:
     reservedNames = ["Message", "Command"]
 
     # Initialize the manager, maily getting the htcondor schedd
-    def __init__(self, mgrDir: str, mgrMsg: str = ""):
+    def __init__(self, mgrDir: str, mgrMsg: str = "", maxJobIdle: int = -1):
         log.info("MONITOR: INIT")
 
         #  get the schedd
@@ -59,6 +59,9 @@ class manager:
         self.saveFileName = self.dir+"/data.json"
         self.mgrMsg = mgrMsg
         self.command = " ".join(sys.argv)
+
+        self.maxJobIdle = maxJobIdle 
+        self.curJobIdle = 0
 
     # check if save file already exists
     def check_savefile_status(self) -> Tuple[bool, Optional[str]]:
@@ -181,16 +184,24 @@ class manager:
                 sys.exit(1)
 
     # print names of all failed jobs
-    def print_failed(self):
+    def print_failed(self, printLogs : bool = False):
         log.info("Printing failed jobs:")
         for name, j in self.jobs.items():
             if j.get_status() < 0:
                 log.info("%s (id %u)", name, j.clusterID)
+                if printLogs:
+                    log.info(f"log: {j.logFile}")
+                    log.info(f"out: {j.config['output']}")
+                    log.info(f"err: {j.config['error']}")
         # TODO: maybe separate failed and removed?
         log.info("Printing removed jobs:")
         for name, j in self.jobs.items():
             if j.get_status() == 3:
                 log.info("%s (id %u)", name, j.clusterID)
+                if printLogs:
+                    log.info(f"log: {j.logFile}")
+                    log.info(f"out: {j.config['output']}")
+                    log.info(f"err: {j.config['error']}")
 
     # check all tasks in queue whether the jobs they depend on already finished.
     # If some of them failed, add this task to the skipped.
@@ -225,7 +236,11 @@ class manager:
                 break
 
             if isReady:
+                # Check if we did not reach maximum number of submitted jobs
+                if self.maxJobIdle != -1 and self.curJobIdle > self.maxJobIdle:
+                    break # break because it does not make sense to check any other jobs now
                 j.submit()
+                self.curJobIdle += 1 # Add the jobs as a idle for now
 
     # check if some job should be resubmitted
     def check_resubmit(self, j: job, retryFailed: bool = False):
@@ -324,25 +339,35 @@ class manager:
                 # if no job is waiting nor running, finish the manager
                 if not (c.waiting + c.notSub + c.idle + c.run > 0):
                     break
+                
+                # Update current idle of jobs managed by manager.
+                # All new jobs submitted jobs in `check_dependence`
+                # will increase this number, that why we create different
+                # variable than `c.idle`
+                self.curJobIdle = c.idle
 
                 # checking dependencies and submitting ready jobs
                 self.check_dependence()
                 self.save(quiet=True)
 
                 # instead of sleeping wait for input
-                log.info("|-Input 'f' to show failed jobs and 'x' to exit------------------|")
+                log.info("|-Input 'f' to show failed jobs, 'ff' to also show log paths-------|")
+                log.info("|-Input 'x' to exit----------------------------------------------|")
                 log.info("|-Input 'retry all' to retry all failed jobs---------------------|")
 
             state, var = cli.input_checker({
                 "f": "",
                 "x": "",
+                "ff": "",
                 "retry all": ""}, silent=True,
                 timeout=sleepTime)
             if state == cli.InputState.SUCCESS:
                 if var == "f":
                     self.print_failed()
+                elif var == "ff":
+                    self.print_failed(True)
                 elif var == "x":
-                    log.info("MONITOR: INTERUPTED")
+                    log.info("MONITOR: EXITING")
                     return
                 elif var == "retry all":
                     for j in self.jobs.values():
