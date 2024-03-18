@@ -23,16 +23,23 @@ class job:
     # Define the job by its name and add a schedd
     def __init__(self, name: str, schedd: ScheddWrapper) -> None:
 
-        # first, define schedd
+        # first, define HTCondor schedd wrapper
         self.schedd = schedd
 
-        self.name = name        # name of the job for easy identification
+        # name of the job for easy identification
+        self.name = name
 
         # since we will be resubmitting, job IDs are kept as a list
         self.clusterIDs: List[str] = []
 
         # add a decoration to the job to hold dependencies
         self.dependencies: List["job"] = []
+
+        # configuration of the jobs
+        self.config: Dict[str, str] = {}
+
+        # to setup initial state (done/submitted and so on)
+        self.reset()
 
     # set up a simple job with only executable and a path to log files
     def set_simple(self, exe: str, logPath: str):
