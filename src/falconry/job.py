@@ -27,7 +27,7 @@ class job:
         self.schedd = schedd
 
         # name of the job for easy identification
-        self.name = name        
+        self.name = name
 
         # since we will be resubmitting, job IDs are kept as a list
         self.clusterIDs: List[str] = []

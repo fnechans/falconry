@@ -60,7 +60,7 @@ class manager:
         self.mgrMsg = mgrMsg
         self.command = " ".join(sys.argv)
 
-        self.maxJobIdle = maxJobIdle 
+        self.maxJobIdle = maxJobIdle
         self.curJobIdle = 0
 
     # check if save file already exists
@@ -184,7 +184,7 @@ class manager:
                 sys.exit(1)
 
     # print names of all failed jobs
-    def print_failed(self, printLogs : bool = False):
+    def print_failed(self, printLogs: bool = False):
         log.info("Printing failed jobs:")
         for name, j in self.jobs.items():
             if j.get_status() < 0:
@@ -238,9 +238,9 @@ class manager:
             if isReady:
                 # Check if we did not reach maximum number of submitted jobs
                 if self.maxJobIdle != -1 and self.curJobIdle > self.maxJobIdle:
-                    break # break because it does not make sense to check any other jobs now
+                    break  # break because it does not make sense to check any other jobs now
                 j.submit()
-                self.curJobIdle += 1 # Add the jobs as a idle for now
+                self.curJobIdle += 1  # Add the jobs as a idle for now
 
     # check if some job should be resubmitted
     def check_resubmit(self, j: job, retryFailed: bool = False):
@@ -339,7 +339,7 @@ class manager:
                 # if no job is waiting nor running, finish the manager
                 if not (c.waiting + c.notSub + c.idle + c.run > 0):
                     break
-                
+
                 # Update current idle of jobs managed by manager.
                 # All new jobs submitted jobs in `check_dependence`
                 # will increase this number, that why we create different
