@@ -143,12 +143,14 @@ class job:
             # the htcondor version of the configuration
             self.htjob = htcondor.Submit(self.config)
 
-        with self.schedd.transaction() as txn:
-            self.clusterID = self.htjob.queue(txn)
-            self.clusterIDs.append(self.clusterID)
-            log.info("Submitting job %s with id %s", self.name, self.clusterID)
-            log.debug(self.config)
-            self.logFile = self.config["log"].replace("$(ClusterId)", str(self.clusterIDs[-1]))
+        # Of course the submit has different capitalization here ...
+        self.submit_result = self.schedd.submit(self.htjob)
+        self.clusterID = self.submit_result.cluster()
+
+        self.clusterIDs.append(self.clusterID)
+        log.info("Submitting job %s with id %s", self.name, self.clusterID)
+        log.debug(self.config)
+        self.logFile = self.config["log"].replace("$(ClusterId)", str(self.clusterIDs[-1]))
 
         # reset job properties
         self.reset()

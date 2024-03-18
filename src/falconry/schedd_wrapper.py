@@ -41,3 +41,7 @@ class ScheddWrapper:
     @schedd_check
     def history(self, *args, **kwargs):
         return self.schedd.history(*args, **kwargs)
+
+    @schedd_check
+    def submit(self, *args, **kwargs):
+        return self.schedd.submit(*args, **kwargs)
