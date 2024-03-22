@@ -218,7 +218,7 @@ class job:
             return 10
 
         status_log = self._get_status_log()
-        if status_log != 0: # 0 for unknown so try from condor
+        if status_log != 0:  # 0 for unknown so try from condor
             return status_log
 
         cndr_status = self._get_status_condor()
@@ -227,7 +227,7 @@ class job:
             return cndr_status
 
         log.error("Unknown output of job %s!", self.name)
-        return 0 
+        return 0
 
     # get condor status of the job
     def _get_status_condor(self) -> int:

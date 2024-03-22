@@ -326,7 +326,7 @@ class manager:
             c.removed += 1
 
     # start the manager, iteratively checking status of jobs
-    def start_cli(self, sleepTime: int = 60):
+    def start_cli(self, sleep_time: int = 60):
         # TODO: maybe add flag to save for each check? or every n-th check?
 
         log.info("MONITOR: START")
@@ -382,33 +382,37 @@ class manager:
                 self.save()
             event_counter += 1
 
-            state, var = cli.input_checker(
-                {"h": "", "s": "", "f": "", "x": "", "ff": "", "retry all": ""},
-                silent=True,
-                timeout=sleepTime,
-            )
-            if state == cli.InputState.SUCCESS:
-                if var == "f":
-                    self.print_failed()
-                elif var == "s":
-                    self.save()
-                elif var == "h":
-                    log.info(
-                        "|-Enter 'f' to show failed jobs, 'ff' to also show log paths----------|"
-                    )
-                    log.info(
-                        "|-Enter 'x' to exit, 's' to save or 'retry all' to retry all failed---|"
-                    )
-                elif var == "ff":
-                    self.print_failed(True)
-                elif var == "x":
-                    log.info("MONITOR: EXITING")
-                    return
-                elif var == "retry all":
-                    for j in self.jobs.values():
-                        self.check_resubmit(j, True)
+            self.cli_interface(sleep_time)
 
         log.info("MONITOR: FINISHED")
+
+    def cli_interface(self, sleep_time: int = 60):
+        state, var = cli.input_checker(
+            {"h": "", "s": "", "f": "", "x": "", "ff": "", "retry all": ""},
+            silent=True,
+            timeout=sleep_time,
+        )
+        if state == cli.InputState.SUCCESS:
+            if var == "f":
+                self.print_failed()
+            elif var == "s":
+                self.save()
+            elif var == "h":
+                log.info(
+                    "|-Enter 'f' to show failed jobs, 'ff' to also show log paths----------|"
+                )
+                log.info(
+                    "|-Enter 'x' to exit, 's' to save or 'retry all' to retry all failed---|"
+                )
+                self.cli_interface(sleep_time)
+            elif var == "ff":
+                self.print_failed(True)
+            elif var == "x":
+                log.info("MONITOR: EXITING")
+                return
+            elif var == "retry all":
+                for j in self.jobs.values():
+                    self.check_resubmit(j, True)
 
     # start the manager with gui, iteratively checking status of jobs
     def start_gui(self, sleepTime: int = 60):
