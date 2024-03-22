@@ -29,6 +29,12 @@ def main():
 
     mgr = manager(cfg.dir)  # the argument specifies where the job is saved
 
+    file_handler = logging.FileHandler(cfg.rundir + "/falconry.log", mode = "a")
+    dt_fmt = '%Y-%m-%d %H:%M:%S'
+    formatter = logging.Formatter('[{asctime}] [{levelname:<8}] {name}: {message}', dt_fmt, style='{')
+    file_handler.setFormatter(formatter)
+    log.addHandler(file_handler)
+
     # Check if manager was already run in given dir and ask user
     # if they want to load previous instance
     # First return value if user typed reasonable input (quite if not)
