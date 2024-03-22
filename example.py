@@ -29,7 +29,7 @@ def main():
 
     mgr = manager(cfg.dir)  # the argument specifies where the job is saved
 
-    file_handler = logging.FileHandler(cfg.rundir + "/falconry.log", mode = "a")
+    file_handler = logging.FileHandler(cfg.dir + "/falconry.log", mode = "a")
     dt_fmt = '%Y-%m-%d %H:%M:%S'
     formatter = logging.Formatter('[{asctime}] [{levelname:<8}] {name}: {message}', dt_fmt, style='{')
     file_handler.setFormatter(formatter)

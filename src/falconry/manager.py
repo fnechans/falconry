@@ -83,7 +83,8 @@ class manager:
     def ask_for_message(self):
         import select
 
-        log.info("Enter a message to be saved in the save file " "for bookkeeping.")
+        log.info("Enter a message to be saved in the save file "
+                 "for bookkeeping.")
         i, o, e = select.select([sys.stdin], [], [], 60)
         if i:
             self.mgrMsg = sys.stdin.readline().strip()
