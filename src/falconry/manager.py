@@ -4,7 +4,7 @@ import os
 import shutil
 import sys
 import traceback
-import datetime         # so user knowns the time of last check
+import datetime  # so user knowns the time of last check
 
 from typing import Dict, Any, Tuple, Optional
 
@@ -34,12 +34,13 @@ class counter:
 
 
 class manager:
-    """ Manager holds all jobs and periodically checks their status.
+    """Manager holds all jobs and periodically checks their status.
 
     It also take care of dependent jobs,
     submitting jobs when all dependencies are satisfied.
     These are handled as decorations of the job.
     """
+
     reservedNames = ["Message", "Command"]
 
     # Initialize the manager, maily getting the htcondor schedd
@@ -56,7 +57,7 @@ class manager:
         if not os.path.exists(mgrDir):
             os.makedirs(mgrDir)
         self.dir = mgrDir
-        self.saveFileName = self.dir+"/data.json"
+        self.saveFileName = self.dir + "/data.json"
         self.mgrMsg = mgrMsg
         self.command = " ".join(sys.argv)
 
@@ -67,9 +68,9 @@ class manager:
     def check_savefile_status(self) -> Tuple[bool, Optional[str]]:
         if os.path.exists(self.saveFileName):
             log.warning(f"Manager directory {self.dir} already exists!")
-            state, var = cli.input_checker({
-                "l": "Load existing jobs",
-                "n": "Start new jobs"})
+            state, var = cli.input_checker(
+                {"l": "Load existing jobs", "n": "Start new jobs"}
+            )
 
             # Simplify the output for user interface
             # both unknown/timeout have the same result
@@ -81,6 +82,9 @@ class manager:
     # ask for custom meesage
     def ask_for_message(self):
         import select
+
+        log.info("Enter a message to be saved in the save file "
+                 "for bookkeeping.")
         i, o, e = select.select([sys.stdin], [], [], 60)
         if i:
             self.mgrMsg = sys.stdin.readline().strip()
@@ -126,8 +130,10 @@ class manager:
                 if not os.path.exists(fileSuf):
                     shutil.copyfile(fileLatest, fileSuf)
                 else:
-                    raise FileExistsError(f"Destination file {fileSuf} already exists. "
-                                          "This should not be possible.")
+                    raise FileExistsError(
+                        f"Destination file {fileSuf} already exists. "
+                        "This should not be possible."
+                    )
 
         # not necessary to remove, but maybe better to be sure its not broken
         if os.path.exists(self.saveFileName):
@@ -138,7 +144,7 @@ class manager:
     # when `retryFailed` is true
     def load(self, retryFailed: bool = False):
         log.info("Loading past status of jobs")
-        with open(self.dir+"/data.json", "r") as f:
+        with open(self.dir + "/data.json", "r") as f:
             input = json.load(f)
             depNames = {}
             for name, jobDict in input.items():
@@ -224,13 +230,16 @@ class manager:
                 isReady = False
 
                 if tarJob.skipped or tarJob.failed:
-                    log.error("Job %s depends on job %s which either failed or was skipped! Skipping ...", name, tarJob.name)
+                    log.error(
+                        f"Job {name} depends on job {tarJob.name} which either failed or was skipped! Skipping ..."
+                    )
                     j.skipped = True
 
                 status = tarJob.get_status()
                 if status == 3:
-                    log.error("Job %s depends on job %s which is %s! Skipping ...",
-                              name, tarJob.name, translate.statusMessage[status])
+                    log.error(
+                        f"Job {name} depends on job {tarJob.name} which is {translate.statusMessage[status]}! Skipping ..."
+                    )
                     j.skipped = True
 
                 break
@@ -248,16 +257,24 @@ class manager:
         if status > 0:
             log.debug("Job %s has status %s", j.name, translate.statusMessage[status])
         if status == 12:
-            log.warning("Error! Job %s (id %s) failed due to condor, rerunning", j.name, j.clusterID)
+            log.warning(
+                f"Error! Job {j.name} (id {j.clusterID}) failed due to condor, rerunning"
+            )
             j.submit(force=True)
         elif retryFailed and status < 0:
-            log.warning("Error! Job %s (id %s) failed and will be retried, rerunning", j.name, j.clusterID)
+            log.warning(
+                f"Error! Job {j.name} (id {j.clusterID}) failed and will be retried, rerunning"
+            )
             j.submit(force=True)
         elif retryFailed and status == 3:
-            log.warning("Error! Job %s (id %s) was removed and will be retried, rerunning", j.name, j.clusterID)
+            log.warning(
+                f"Error! Job {j.name} (id {j.clusterID}) was removed and will be retried, rerunning"
+            )
             j.submit(force=True)
         elif retryFailed and j.submitted and (status == 9 or status == 10):
-            log.warning("Error! Job %s was not submitted succesfully (probably...), rerunning", j.name)
+            log.warning(
+                f"Error! Job {j.name} was not submitted succesfully (probably...), rerunning"
+            )
             j.submit(force=True)
 
     # resubmit jobs and find out state of the jobs
@@ -272,7 +289,7 @@ class manager:
 
             self.count_job(c, j)
 
-            print(" "*maxLength+"\r", flush=True, end='')
+            print(" " * maxLength + "\r", flush=True, end='')
 
     # resubmit jobs and find out state of a job
     def count_job(self, c: counter, j: job):
@@ -309,36 +326,39 @@ class manager:
             c.removed += 1
 
     # start the manager, iteratively checking status of jobs
-    def start_cli(self, sleepTime: int = 60):
+    def start_cli(self, sleep_time: int = 60):
         # TODO: maybe add flag to save for each check? or every n-th check?
 
         log.info("MONITOR: START")
 
         c = counter()
+        event_counter = 0
         while True:
 
-            log.info("|-Checking status of jobs [%s]-----------|", str(datetime.datetime.now()))
+            log.info(
+                f"|-Checking status of jobs [{datetime.datetime.now()}]----------------|",
+            )
 
             cOld = c
             c = counter()
             self.count_jobs(c)
 
+            # if no job is waiting nor running, finish the manager
+            if not (c.waiting + c.notSub + c.idle + c.run > 0):
+                break
+
             # only printout if something changed:
             if c != cOld:
                 log.info(
-                    "| nsub: {0:>4} | hold: {1:>4} | fail: {2:>4} | rem: {3:>5} | skip: {4:>4} |".format(
+                    "| nsub: {0:>4} | hold: {1:>5} | fail: {2:>6} | rem: {3:>6} | skip: {4:>5} |".format(
                         c.notSub, c.held, c.failed, c.removed, c.skipped
                     )
                 )
                 log.info(
-                    "| wait: {0:>4} | idle: {1:>4} | RUN: {2:>5} | DONE: {3:>4} | TOT: {4:>5} |".format(
+                    "| wait: {0:>6} | idle: {1:>4} | RUN: {2:>5} | DONE: {3:>6} | TOT: {4:>6} |".format(
                         c.waiting, c.idle, c.run, c.done, len(self.jobs)
                     )
                 )
-
-                # if no job is waiting nor running, finish the manager
-                if not (c.waiting + c.notSub + c.idle + c.run > 0):
-                    break
 
                 # Update current idle of jobs managed by manager.
                 # All new jobs submitted jobs in `check_dependence`
@@ -351,29 +371,48 @@ class manager:
                 self.save(quiet=True)
 
                 # instead of sleeping wait for input
-                log.info("|-Input 'f' to show failed jobs, 'ff' to also show log paths-------|")
-                log.info("|-Input 'x' to exit----------------------------------------------|")
-                log.info("|-Input 'retry all' to retry all failed jobs---------------------|")
+                log.info(
+                    "|-Enter 'h' to show all commands, e.g. to resubmit or show failed jobs|"
+                )
 
-            state, var = cli.input_checker({
-                "f": "",
-                "x": "",
-                "ff": "",
-                "retry all": ""}, silent=True,
-                timeout=sleepTime)
-            if state == cli.InputState.SUCCESS:
-                if var == "f":
-                    self.print_failed()
-                elif var == "ff":
-                    self.print_failed(True)
-                elif var == "x":
-                    log.info("MONITOR: EXITING")
-                    return
-                elif var == "retry all":
-                    for j in self.jobs.values():
-                        self.check_resubmit(j, True)
+            # save with timestamp every 30 events
+            # most important for first event when first
+            # batch of jobs is defined
+            if event_counter % 30 == 0:
+                self.save()
+            event_counter += 1
+
+            self.cli_interface(sleep_time)
 
         log.info("MONITOR: FINISHED")
+
+    def cli_interface(self, sleep_time: int = 60):
+        state, var = cli.input_checker(
+            {"h": "", "s": "", "f": "", "x": "", "ff": "", "retry all": ""},
+            silent=True,
+            timeout=sleep_time,
+        )
+        if state == cli.InputState.SUCCESS:
+            if var == "f":
+                self.print_failed()
+            elif var == "s":
+                self.save()
+            elif var == "h":
+                log.info(
+                    "|-Enter 'f' to show failed jobs, 'ff' to also show log paths----------|"
+                )
+                log.info(
+                    "|-Enter 'x' to exit, 's' to save or 'retry all' to retry all failed---|"
+                )
+                self.cli_interface(sleep_time)
+            elif var == "ff":
+                self.print_failed(True)
+            elif var == "x":
+                log.info("MONITOR: EXITING")
+                return
+            elif var == "retry all":
+                for j in self.jobs.values():
+                    self.check_resubmit(j, True)
 
     # start the manager with gui, iteratively checking status of jobs
     def start_gui(self, sleepTime: int = 60):
@@ -406,7 +445,7 @@ class manager:
         labels["d"] = quick_label("0", 4, 1)
         labels["w"] = quick_label("0", 5, 1)
         labels["s"] = quick_label("0", 6, 1)
-        labels["rm"] = quick_label("0",  1)
+        labels["rm"] = quick_label("0", 1)
 
         frm_counter.grid(row=0, column=0)
 
@@ -430,7 +469,7 @@ class manager:
             # checking dependencies and submitting ready jobs
             self.check_dependence()
 
-            window.after(1000*sleepTime, tk_count)
+            window.after(1000 * sleepTime, tk_count)
 
         tk_count()
         log.info("MONITOR: START")
@@ -444,7 +483,7 @@ class manager:
             if gui:
                 self.start_gui(sleepTime)
             else:
-                self.start_cli(sleepTime)  # argument is interval between checking of the jobs
+                self.start_cli(sleepTime)
         except KeyboardInterrupt:
             log.error("Manager interrupted with keyboard!")
             log.error("Saving and exitting ...")
@@ -460,7 +499,9 @@ class manager:
 
     # out-dated soon to be removed start_safe (now just start)
     def start_safe(self, sleepTime: int = 60, gui: bool = False):
-        log.warning("IMPORTANT! `start_safe` is now renamed as `start`. "
-                    "Change your scripts as `start_safe` will be removed "
-                    "in next version!")
+        log.warning(
+            "IMPORTANT! `start_safe` is now renamed as `start`. "
+            "Change your scripts as `start_safe` will be removed "
+            "in next version!"
+        )
         self.start(sleepTime, gui)

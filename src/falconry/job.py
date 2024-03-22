@@ -217,13 +217,17 @@ class job:
         elif not os.path.isfile(self.logFile):
             return 10
 
+        status_log = self._get_status_log()
+        if status_log != 0:  # 0 for unknown so try from condor
+            return status_log
+
         cndr_status = self._get_status_condor()
         # If job is incomplete, simply return the status:
         if cndr_status != 4 and cndr_status != -999:
             return cndr_status
 
-        # Otherwise detemine status from log file
-        return self._get_status_log()
+        log.error("Unknown output of job %s!", self.name)
+        return 0
 
     # get condor status of the job
     def _get_status_condor(self) -> int:
@@ -231,7 +235,7 @@ class job:
 
     def _get_status_log(self) -> int:
         # Check log file to determine if job finished with an error
-        with open(self.logFile) as fl:
+        with open(self.logFile, 'r') as fl:
             search = fl.read()
 
         # User abortion is special case
@@ -248,13 +252,13 @@ class job:
         # Otherwise check `"Job terminated"`. If the log does not contain it
         # its unknown state
         if "Job terminated" not in search:
-            log.error("Unknown output of job %s!", self.name)
+            return 0
 
         # Evaluate `"Job terminated"`
         searchSplit = search.split("\n")
         for line in searchSplit:
-            line = line.rstrip()  # remove '\n' at end of line
             if "Normal termination (return value" in line:
+                line = line.rstrip()  # remove '\n' at end of line
                 status = int(line.split("value")[1].strip()[:-1])
 
                 if status == 0:
