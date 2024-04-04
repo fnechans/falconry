@@ -1,5 +1,6 @@
 import logging
 import json
+import ijson
 import os
 import shutil
 import sys
@@ -124,7 +125,7 @@ class manager:
         fileSuf = f"{self.saveFileName}.{current_time}"  # only if not quiet
 
         with open(fileLatest, "w") as f:
-            json.dump(output, f)
+            json.dump(output, f, indent=2)
             if not quiet:
                 log.info("Success! Making copy with time-stamp.")
                 if not os.path.exists(fileSuf):
@@ -145,9 +146,8 @@ class manager:
     def load(self, retryFailed: bool = False):
         log.info("Loading past status of jobs")
         with open(self.dir + "/data.json", "r") as f:
-            input = json.load(f)
             depNames = {}
-            for name, jobDict in input.items():
+            for name, jobDict in ijson.kvitems(f, ""):
                 if name in manager.reservedNames:
                     continue
                 log.debug("Loading job %s", name)

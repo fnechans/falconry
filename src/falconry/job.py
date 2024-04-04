@@ -278,8 +278,8 @@ class job:
 
     def set_time(self, runTime: int) -> None:
         self.config["+MaxRuntime"] = str(runTime)
-        # TODO: this does not work on UI
-        # self.config["+RequestRuntime"] = str(runTime)
+        # TODO: this does not work on UI? Check
+        self.config["+RequestRuntime"] = str(runTime)
 
     def set_arguments(self, args: str) -> None:
         self.config["arguments"] = args
