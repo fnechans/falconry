@@ -276,10 +276,12 @@ class job:
         for key, item in dict.items():
             self.config[key] = item
 
-    def set_time(self, runTime: int) -> None:
+    def set_time(self, runTime: int, useRequestRuntime: bool = False) -> None:
         self.config["+MaxRuntime"] = str(runTime)
-        # TODO: this does not work on UI? Check
-        self.config["+RequestRuntime"] = str(runTime)
+        # RequestRuntime seems to be DESY specific option and does not work
+        # e.g. in Prague (jobs get held), so this option is false by default
+        if useRequestRuntime:
+            self.config["+RequestRuntime"] = str(runTime)
 
     def set_arguments(self, args: str) -> None:
         self.config["arguments"] = args
