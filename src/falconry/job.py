@@ -163,7 +163,7 @@ class job:
 
         # first check if job was not submitted before:
         if not force and self.clusterIDs != []:
-            status = self._get_status()
+            status = self.get_status()
             if status == 12 or status < 0 or status == 10:
                 log.info("Job %s failed and will be resubmitted.", self.name)
             else:

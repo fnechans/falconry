@@ -239,7 +239,7 @@ class manager:
         """
         log.info("Printing failed jobs:")
         for name, j in self.jobs.items():
-            if j._get_status() < 0:
+            if j.get_status() < 0:
                 log.info("%s (id %u)", name, j.clusterID)
                 if printLogs:
                     log.info(f"log: {j.logFile}")
@@ -248,7 +248,7 @@ class manager:
         # TODO: maybe separate failed and removed?
         log.info("Printing removed jobs:")
         for name, j in self.jobs.items():
-            if j._get_status() == 3:
+            if j.get_status() == 3:
                 log.info("%s (id %u)", name, j.clusterID)
                 if printLogs:
                     log.info(f"log: {j.logFile}")
@@ -282,7 +282,7 @@ class manager:
                     )
                     j.skipped = True
 
-                status = tarJob._get_status()
+                status = tarJob.get_status()
                 if status == 3:
                     log.error(
                         f"Job {name} depends on job {tarJob.name} which is {translate.statusMessage[status]}! Skipping ..."
@@ -306,7 +306,7 @@ class manager:
             retryFailed (bool, optional): whether to also retry failed jobs.
                 Defaults to False.
         """
-        status = j._get_status()
+        status = j.get_status()
         if status > 0:
             log.debug("Job %s has status %s", j.name, translate.statusMessage[status])
         if status == 12:
