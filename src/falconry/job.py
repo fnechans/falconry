@@ -11,16 +11,19 @@ log = logging.getLogger('falconry')
 
 
 class job:
-    """ Submits and holds a single job and all relevant information
+    """Submits and holds a single job and all relevant information
 
     Currently planning to keep single job per clusterID,
     since group submittion would significantly complicate resubmitting.
     HTCondor does not seem to allow for re-submittion of single ProcId,
     so one would have to first connect specific arguments to specific ProcIds
     and then resubmit individual jobs anyway.
+
+    Arguments:
+        name (str): name of the job for easy identification
+        schedd (ScheddWrapper): HTCondor schedd wrapper
     """
 
-    # Define the job by its name and add a schedd
     def __init__(self, name: str, schedd: ScheddWrapper) -> None:
 
         # first, define HTCondor schedd wrapper
@@ -41,15 +44,20 @@ class job:
         # to setup initial state (done/submitted and so on)
         self.reset()
 
-    # set up a simple job with only executable and a path to log files
     def set_simple(self, exe: str, logPath: str):
+        """Sets up a simple job with only executable and a path to log files
+
+        Arguments:
+            exe (str): path to the executable
+            logPath (str): path to the log files
+        """
 
         # htcondor defines job as a dict
         cfg = {
-            "executable":   exe,
-            "output":       logPath + "/" + self.name + "/$(ClusterId).out",
-            "error":        logPath + "/" + self.name + "/$(ClusterId).err",
-            "log":          logPath + "/" + self.name + "/$(ClusterId).log"
+            "executable": exe,
+            "output": logPath + "/" + self.name + "/$(ClusterId).out",
+            "error": logPath + "/" + self.name + "/$(ClusterId).err",
+            "log": logPath + "/" + self.name + "/$(ClusterId).log",
         }
         self.config = cfg
 
@@ -61,15 +69,20 @@ class job:
         # setup flags:
         self.reset()
 
-    # define dict containing all relevant job information
     def save(self) -> Dict[str, Any]:
+        """Returns a dictionary containing all relevant job information
+        to be saved to a file.
+
+        Returns:
+            Dict[str, Any]: dictionary containing job information
+        """
         # first rewrite dependencies using names
         depNames = [j.name for j in self.dependencies]
         jobDict = {
             "clusterIDs": self.clusterIDs,
             "config": self.config,
             "depNames": depNames,
-            "done": "false"
+            "done": "false",
         }
         # to test if job is done takes long time
         # because log file needs to be checked
@@ -78,9 +91,14 @@ class job:
             jobDict["done"] = "true"
         return jobDict
 
-    # define job from dictionary created using the save function
-    # TODO: define proper "jobDict checker"
     def load(self, jobDict: Dict[str, Any]) -> None:
+        """Loads a job from a dictionary created using the save function.
+
+        Arguments:
+            jobDict (Dict[str, Any]): dictionary containing job information
+        """
+
+        # TODO: define proper "jobDict checker"
         if "clusterIDs" not in jobDict.keys() and "config" not in jobDict.keys():
             log.error("Job dictionary in a wrong form")
             raise SystemError
@@ -101,26 +119,42 @@ class job:
         if len(self.clusterIDs):
             self.htjob = htcondor.Submit(self.config)
             self.clusterID = self.clusterIDs[-1]
-            self.logFile = self.config["log"].replace("$(ClusterId)", str(self.clusterID))
-            self.outFile = self.config["output"].replace("$(ClusterId)", str(self.clusterID))
-            self.errFile = self.config["error"].replace("$(ClusterId)", str(self.clusterID))
+            self.logFile = self.config["log"].replace(
+                "$(ClusterId)", str(self.clusterID)
+            )
+            self.outFile = self.config["output"].replace(
+                "$(ClusterId)", str(self.clusterID)
+            )
+            self.errFile = self.config["error"].replace(
+                "$(ClusterId)", str(self.clusterID)
+            )
             self.submitted = True
 
-    # reset job flags
     def reset(self) -> None:
+        """Resets job flags"""
         self.submitted = False
         self.skipped = False
         self.failed = False
         self.done = False
 
-    # extend dependen
-    # old def add_job_dependency(self, dps: List["job"]) -> None:
     def add_job_dependency(self, *args: "job") -> None:
+        """Add dependencies to the job.
+
+        Arguments:
+            *args (List["job"]): list of jobs
+        """
         self.dependencies.extend(list(args))
 
     # submit the job
-    # TODO: raise error if problem
     def submit(self, force: bool = False) -> None:
+        """Submits the job to HTCondor if either the job is not submitted,
+        the force flag is set or the job failed.
+
+        Arguments:
+            force (bool, optional): force submission. Defaults to False.
+        """
+        # TODO: raise error if problem
+
         # force: for cases when the job status was checked
         # e.g. when retrying
         # this is can save a lot of time because
@@ -129,11 +163,13 @@ class job:
 
         # first check if job was not submitted before:
         if not force and self.clusterIDs != []:
-            status = self.get_status()
+            status = self._get_status()
             if status == 12 or status < 0 or status == 10:
                 log.info("Job %s failed and will be resubmitted.", self.name)
             else:
-                log.info("The job is %s, not submitting", translate.statusMessage[status])
+                log.info(
+                    "The job is %s, not submitting", translate.statusMessage[status]
+                )
                 return
         else:
             # the htcondor version of the configuration
@@ -147,30 +183,41 @@ class job:
         log.info("Submitting job %s with id %s", self.name, self.clusterID)
         log.debug(self.config)
         self.logFile = self.config["log"].replace("$(ClusterId)", str(self.clusterID))
-        self.outFile = self.config["output"].replace("$(ClusterId)", str(self.clusterID))
+        self.outFile = self.config["output"].replace(
+            "$(ClusterId)", str(self.clusterID)
+        )
         self.errFile = self.config["error"].replace("$(ClusterId)", str(self.clusterID))
 
         # reset job properties
         self.reset()
         self.submitted = True
 
-    # simple implementations of release, remove, ...
     def release(self) -> bool:
+        """Releases held job"""
         if self.clusterIDs == []:
             return False
-        self.schedd.act(htcondor.JobAction.Release, "ClusterId == "+str(self.clusterID))
+        self.schedd.act(
+            htcondor.JobAction.Release, "ClusterId == " + str(self.clusterID)
+        )
         log.info("Releasing job %s with id %s", self.name, self.clusterID)
         return True
 
     def remove(self) -> bool:
+        """Removes the job from HTCondor"""
         if self.clusterIDs == []:
             return False
-        self.schedd.act(htcondor.JobAction.Remove, "ClusterId == "+str(self.clusterID))
+        self.schedd.act(
+            htcondor.JobAction.Remove, "ClusterId == " + str(self.clusterID)
+        )
         log.info("Removing job %s with id %s", self.name, self.clusterID)
         return True
 
-    # get information about the job
     def get_info(self) -> Dict[str, Any]:
+        """Returns information about the job
+
+        Returns:
+            Dict[str, Any]: dictionary containing job information
+        """
         # check if job has an ID
         if self.clusterIDs == []:
             log.error("Trying to list info for a job which was not submitted")
@@ -178,19 +225,14 @@ class job:
 
         constr = "ClusterId == " + str(self.clusterID)
         # get all job info of running job
-        ads = self.schedd.query(
-            constraint=constr
-        )
+        ads = self.schedd.query(constraint=constr)
 
         # if the job finished, query will be empty and we have to use history
         # because condor is stupid, it returns and iterator (?),
         # so just returning first element
         # TODO: add more to projection
         if ads == []:
-            for ad in self.schedd.history(
-                constraint=constr,
-                projection=["JobStatus"]
-            ):
+            for ad in self.schedd.history(constraint=constr, projection=["JobStatus"]):
                 return ad
 
         # check if only one job was returned
@@ -201,15 +243,21 @@ class job:
             if ads == []:
                 return {"JobStatus": -999}
             else:
-                log.error("HTCondor returned more than one jobs for given ID, this should not happen!")
+                log.error(
+                    "HTCondor returned more than one jobs for given ID, this should not happen!"
+                )
                 log.error("Job %s with id %u", self.name, self.clusterID)
                 print(ads)
                 raise SystemError
 
         return ads[0]  # we take only single job, so return onl the first eleement
 
-    # get status of the job, as defined in translate.py
     def get_status(self) -> int:
+        """Returns status of the job, as defined in translate.py
+
+        Returns:
+            int: status of the job
+        """
 
         # First check if the job is skipped or not even submitted
         if self.skipped:
@@ -233,11 +281,20 @@ class job:
         log.error("Unknown output of job %s!", self.name)
         return 0
 
-    # get condor status of the job
     def _get_status_condor(self) -> int:
+        """Returns status of the job, as defined in condor
+
+        Returns:
+            int: status of the job
+        """
         return self.get_info()["JobStatus"]
 
     def _get_status_log(self) -> int:
+        """Gets status from the log file
+
+        Returns:
+            int: status of the job
+        """
         # Check log file to determine if job finished with an error
         with open(self.logFile, 'r') as fl:
             search = fl.read()
@@ -277,10 +334,24 @@ class job:
         return 11  # no "Normal termination for Job terminated"
 
     def set_custom(self, dict: Dict[str, str]) -> None:
+        """Sets custom configuration for the job from a dictionary
+
+        Arguments:
+            dict (Dict[str, str]): dictionary containing job configuration
+        """
         for key, item in dict.items():
             self.config[key] = item
 
     def set_time(self, runTime: int, useRequestRuntime: bool = False) -> None:
+        """Sets time limit for the job.
+
+        For some clusters (DESY), RequestRuntime is used instead of MaxRuntime,
+        to use it set useRequestRuntime to `True`.
+
+        Arguments:
+            runTime (int): time limit in seconds
+            useRequestRuntime (bool, optional): use RequestRuntime option. Defaults to False.
+        """
         self.config["+MaxRuntime"] = str(runTime)
         # RequestRuntime seems to be DESY specific option and does not work
         # e.g. in Prague (jobs get held), so this option is false by default
@@ -288,4 +359,9 @@ class job:
             self.config["+RequestRuntime"] = str(runTime)
 
     def set_arguments(self, args: str) -> None:
+        """Sets arguments for the job
+
+        Arguments:
+            args (str): arguments for the job
+        """
         self.config["arguments"] = args

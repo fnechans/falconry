@@ -5,7 +5,8 @@ import os
 import shutil
 import sys
 import traceback
-import datetime  # so user knowns the time of last check
+import datetime
+import select
 from time import sleep
 
 from typing import Dict, Any, Tuple, Optional
@@ -41,15 +42,19 @@ class manager:
     It also take care of dependent jobs,
     submitting jobs when all dependencies are satisfied.
     These are handled as decorations of the job.
+
+    Arguments:
+        mgrDir (str): directory where the manager stores the jobs
+        mgrMsg (str): message to be saved in the save file
+        maxJobIdle (int): maximum number of idle jobs
     """
 
     reservedNames = ["Message", "Command"]
 
-    # Initialize the manager, maily getting the htcondor schedd
     def __init__(self, mgrDir: str, mgrMsg: str = "", maxJobIdle: int = -1):
         log.info("MONITOR: INIT")
 
-        #  get the schedd
+        # Initialize the manager, maily getting the htcondor schedd
         self.schedd = ScheddWrapper()
 
         # job collection
@@ -68,6 +73,13 @@ class manager:
 
     # check if save file already exists
     def check_savefile_status(self) -> Tuple[bool, Optional[str]]:
+        """Checks if the save file already exists. If it does, asks the user
+        whether to load existing jobs or start new ones.
+
+        Returns:
+            Tuple[bool, Optional[str]]: (True, 'l') if load, (True, 'n') if new,
+            (False, None) if error
+        """
         if os.path.exists(self.saveFileName):
             log.warning(f"Manager directory {self.dir} already exists!")
             state, var = cli.input_checker(
@@ -81,18 +93,23 @@ class manager:
             return False, var
         return True, "n"  # automatically assume new
 
-    # ask for custom meesage
     def ask_for_message(self):
-        import select
+        """Asks user for a message to be saved in the save file for bookkeeping."""
 
-        log.info("Enter a message to be saved in the save file "
-                 "for bookkeeping.")
+        log.info("Enter a message to be saved in the save file " "for bookkeeping.")
         i, o, e = select.select([sys.stdin], [], [], 60)
         if i:
             self.mgrMsg = sys.stdin.readline().strip()
 
-    # add a job to the manager
     def add_job(self, j: job, update: bool = False):
+        """Adds a job to the manager. If the job already exists and `update` is
+        `True`, it will be updated.
+
+        Arguments:
+            j (job): job to be added
+            update (bool, optional): whether to update the job if it already
+            exists. Defaults to False.
+        """
         # some reserved names, to simplify saving later
         if j.name in manager.reservedNames:
             log.error("Name %s  is reserved! Exiting ...", j.name)
@@ -104,13 +121,19 @@ class manager:
                 log.error("Job %s already exists! Exiting ...", j.name)
                 raise SystemExit
             else:
-                # TODO: update old style string to f-strings?
                 log.info(f"Updating job {j.name}.")
 
         self.jobs[j.name] = j
 
-    # save current status
     def save(self, quiet: bool = False):
+        """Saves the current status of the jobs to a json file.
+
+        If `quiet` is `True`, it will not print any messages and
+        will not make a time-stamped copy of the save file.
+
+        Arguments:
+            quiet (bool, optional): whether to print messages. Defaults to False.
+        """
         if not quiet:
             log.info("Saving current status of jobs")
         output: Dict[str, Any] = {
@@ -142,9 +165,14 @@ class manager:
             os.remove(self.saveFileName)
         os.symlink(fileLatest.split("/")[-1], self.saveFileName)
 
-    # load saved jobs and retry those that failed
-    # when `retryFailed` is true
     def load(self, retryFailed: bool = False):
+        """Loads the saved status of the jobs from a json file
+        provided by the user.
+
+        Arguments:
+            retryFailed (bool, optional): whether to retry the failed jobs.
+            Defaults to False.
+        """
         log.info("Loading past status of jobs")
         with open(self.dir + "/data.json", "r") as f:
             depNames = {}
@@ -176,7 +204,7 @@ class manager:
         if retryFailed:
             try:
                 for j in self.jobs.values():
-                    self.check_resubmit(j, True)
+                    self._check_resubmit(j, True)
             except KeyboardInterrupt:
                 log.error("Manager interrupted with keyboard!")
                 log.error("Saving and exitting ...")
@@ -203,9 +231,15 @@ class manager:
 
     # print names of all failed jobs
     def print_failed(self, printLogs: bool = False):
+        """Prints names of all failed jobs.
+
+        Arguments:
+            printLogs (bool, optional): whether to print paths to logs.
+                Defaults to False.
+        """
         log.info("Printing failed jobs:")
         for name, j in self.jobs.items():
-            if j.get_status() < 0:
+            if j._get_status() < 0:
                 log.info("%s (id %u)", name, j.clusterID)
                 if printLogs:
                     log.info(f"log: {j.logFile}")
@@ -214,19 +248,20 @@ class manager:
         # TODO: maybe separate failed and removed?
         log.info("Printing removed jobs:")
         for name, j in self.jobs.items():
-            if j.get_status() == 3:
+            if j._get_status() == 3:
                 log.info("%s (id %u)", name, j.clusterID)
                 if printLogs:
                     log.info(f"log: {j.logFile}")
                     log.info(f"out: {j.outFile}")
                     log.info(f"err: {j.errFile}")
 
-    # check all tasks in queue whether the jobs they depend on already finished.
-    # If some of them failed, add this task to the skipped.
-    def check_dependence(self):
+    def _check_dependence(self):
+        """Checks if all dependencies of a job are done. If so, it will submit
+        the job. If any of the dependencies failed, it will add the job to the
+        skipped list.
+        """
 
         # TODO: consider if not submitted jobs in a special list
-
         for name, j in self.jobs.items():
             # only check jobs which are neither submitted nor skipped
             if j.submitted or j.skipped:
@@ -247,7 +282,7 @@ class manager:
                     )
                     j.skipped = True
 
-                status = tarJob.get_status()
+                status = tarJob._get_status()
                 if status == 3:
                     log.error(
                         f"Job {name} depends on job {tarJob.name} which is {translate.statusMessage[status]}! Skipping ..."
@@ -263,9 +298,15 @@ class manager:
                 j.submit()
                 self.curJobIdle += 1  # Add the jobs as a idle for now
 
-    # check if some job should be resubmitted
-    def check_resubmit(self, j: job, retryFailed: bool = False):
-        status = j.get_status()
+    def _check_resubmit(self, j: job, retryFailed: bool = False):
+        """Checks if a job should be resubmitted due to some known problems.
+
+        Arguments:
+            j (job): job to check
+            retryFailed (bool, optional): whether to also retry failed jobs.
+                Defaults to False.
+        """
+        status = j._get_status()
         if status > 0:
             log.debug("Job %s has status %s", j.name, translate.statusMessage[status])
         if status == 12:
@@ -288,14 +329,20 @@ class manager:
                 f"Error! Job {j.name} was not submitted succesfully (probably...), rerunning"
             )
             j.submit(force=True)
+
         elif retryFailed and j.skipped:
             log.warning(
                 f"Error! Job {j.name} was skipped and will be retried, rerunning"
             )
             j.skipped = False
 
-    # resubmit jobs and find out state of the jobs
-    def count_jobs(self, c: counter):
+    def _count_jobs(self, c: counter):
+        """Counts the number of jobs with different status.
+        Resubmits jobs which failed due to condor problems.
+
+        Arguments:
+            c (counter): counter object to count the jobs
+        """
 
         maxLength = 0
         for name, j in self.jobs.items():
@@ -304,12 +351,18 @@ class manager:
                 maxLength = len(printStr)
             print(printStr, end='')
 
-            self.count_job(c, j)
+            self._count_job(c, j)
 
             print(" " * maxLength + "\r", flush=True, end='')
 
-    # resubmit jobs and find out state of a job
-    def count_job(self, c: counter, j: job):
+    def _count_job(self, c: counter, j: job):
+        """Updates the counter object with the status of a single job.
+        Also resubmits jobs which failed due to condor problems.
+
+        Arguments:
+            c (counter): counter object to update
+            j (job): job to check
+        """
 
         # first check if job is not submitted, skipped or done
         if j.skipped:
@@ -323,10 +376,10 @@ class manager:
             return
 
         #  resubmit job which failed due to condor problems
-        self.check_resubmit(j)
+        self._check_resubmit(j)
 
         # count job with different status
-        status = j.get_status()
+        status = j._get_status()
         if status == 9 or status == 10:
             c.notSub += 1
         elif status == 1:
@@ -342,8 +395,13 @@ class manager:
         elif status == 3:
             c.removed += 1
 
-    # start the manager, iteratively checking status of jobs
-    def start_cli(self, sleep_time: int = 60):
+    def _start_cli(self, sleep_time: int = 60):
+        """Starts the manager, iteratively checking status of jobs.
+
+        Arguments:
+            sleep_time (int, optional): time to sleep between checks.
+                Defaults to 60.
+        """
         # TODO: maybe add flag to save for each check? or every n-th check?
 
         log.info("MONITOR: START")
@@ -358,7 +416,7 @@ class manager:
 
             cOld = c
             c = counter()
-            self.count_jobs(c)
+            self._count_jobs(c)
 
             # if no job is waiting nor running, finish the manager
             if not (c.waiting + c.notSub + c.idle + c.run > 0):
@@ -366,7 +424,7 @@ class manager:
 
             # only printout if something changed:
             if c != cOld:
-                sleep(0.2) # the printing sometimes breaks here, adding delay helps...
+                sleep(0.2)  # the printing sometimes breaks here, adding delay helps...
                 log.info(
                     "| nsub: {0:>4} | hold: {1:>5} | fail: {2:>6} | rem: {3:>6} | skip: {4:>5} |".format(
                         c.notSub, c.held, c.failed, c.removed, c.skipped
@@ -385,7 +443,7 @@ class manager:
                 self.curJobIdle = c.idle
 
                 # checking dependencies and submitting ready jobs
-                self.check_dependence()
+                self._check_dependence()
                 self.save(quiet=True)
 
                 # instead of sleeping wait for input
@@ -400,14 +458,29 @@ class manager:
                 self.save()
             event_counter += 1
 
-            self.cli_interface(sleep_time)
+            self._cli_interface(sleep_time)
 
         log.info("MONITOR: FINISHED")
 
-    def cli_interface(self, sleep_time: int = 60):
+    def _cli_interface(self, sleep_time: int = 60):
+        """CLI interface for the manager.
+
+        Arguments:
+            sleep_time (int, optional): time to sleep between checks.
+                Defaults to 60.
+        """
         print('>>>> ', end='', flush=True)
         state, var = cli.input_checker(
-            {"h": "", "s": "", "f": "", "x": "", "ff": "", "retry all": "", "r":"", "rr":""},
+            {
+                "h": "",
+                "s": "",
+                "f": "",
+                "x": "",
+                "ff": "",
+                "retry all": "",
+                "r": "",
+                "rr": "",
+            },
             silent=True,
             timeout=sleep_time,
         )
@@ -428,22 +501,29 @@ class manager:
                 log.info(
                     "|-Enter 'x' to exit, 's' to save or 'retry all' to retry all failed---|"
                 )
-                self.cli_interface(sleep_time)
+                self._cli_interface(sleep_time)
             elif var == "ff":
                 self.print_failed(True)
             elif var == "r":
                 self.print_running()
-            elif var ==  "rr":
+            elif var == "rr":
                 self.print_running(True)
             elif var == "x":
                 log.info("MONITOR: EXITING")
                 return
             elif var == "retry all":
                 for j in self.jobs.values():
-                    self.check_resubmit(j, True)
+                    self._check_resubmit(j, True)
 
-    # start the manager with gui, iteratively checking status of jobs
-    def start_gui(self, sleepTime: int = 60):
+    def _start_gui(self, sleepTime: int = 60):
+        """Starts the manager with GUI, iteratively checking status of jobs.
+
+        This is only experimental!
+
+        Arguments:
+            sleepTime (int, optional): time to sleep between checks.
+                Defaults to 60.
+        """
 
         log.warning("GUI version is only experimental!")
         import tkinter as tk
@@ -479,7 +559,7 @@ class manager:
 
         def tk_count():
             c = counter()
-            self.count_jobs(c)
+            self._count_jobs(c)
             labels["ns"]["text"] = f"{c.notSub}"
             labels["i"]["text"] = f"{c.idle}"
             labels["r"]["text"] = f"{c.run}"
@@ -495,7 +575,7 @@ class manager:
             #    window.destroy()
 
             # checking dependencies and submitting ready jobs
-            self.check_dependence()
+            self._check_dependence()
 
             window.after(1000 * sleepTime, tk_count)
 
@@ -504,14 +584,23 @@ class manager:
         window.mainloop()
         log.info("MONITOR: FINISHED")
 
-    # if there is an error, especially interupt with keyboard,
-    # save the current state of jobs
     def start(self, sleepTime: int = 60, gui: bool = False):
+        """Starts the manager, iteratively checking status of jobs.
+
+        Makes sure to save the current state of jobs
+        in case of interupt or crash.
+
+        Arguments:
+            sleepTime (int, optional): time to sleep between checks.
+                Defaults to 60.
+            gui (bool, optional): whether to use GUI. Defaults to False.
+                GUI is experimental!
+        """
         try:
             if gui:
-                self.start_gui(sleepTime)
+                self._start_gui(sleepTime)
             else:
-                self.start_cli(sleepTime)
+                self._start_cli(sleepTime)
         except KeyboardInterrupt:
             log.error("Manager interrupted with keyboard!")
             log.error("Saving and exitting ...")
@@ -525,8 +614,8 @@ class manager:
             self.print_failed()
             sys.exit(1)
 
-    # out-dated soon to be removed start_safe (now just start)
     def start_safe(self, sleepTime: int = 60, gui: bool = False):
+        """Deprecated! Use `start` instead!"""
         log.warning(
             "IMPORTANT! `start_safe` is now renamed as `start`. "
             "Change your scripts as `start_safe` will be removed "
