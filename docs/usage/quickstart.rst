@@ -37,6 +37,8 @@ And then to submit the job simply::
 
     j.submit()
 
+More details on job setup can be found in the :ref:`job`<Job> module documentation.
+
 -------
 Manager
 -------
@@ -69,12 +71,14 @@ Now, start the manager with following command::
 
 where the ``checkTime`` specifies time in seconds in between checks of job status. After each interval, it will print status of each jobs and submit those waiting in queue if dependencies are satisfied.
 
-However, user may want to interupt the programm, or there may be a crash. In that case it may be usefull to use ``start_safe()`` function. It calls the ``save()`` function in case of interrupt or crash, which saves all managed jobs in a data.json file. To load previous instance of the manager then simply call::
+However, user may want to interupt the programm, or there may be a crash. For that reason falconry periodically saves all managed jobs in a data.json file via ``save()`` function of the manager. To load previous instance of the manager then simply call::
 
     mgr.load()
+
+More details on manager setup can be found in the :ref:`manager`<Manager> module documentation.
 
 ---------------
 Example program
 ---------------
 
-An example of a complete implemenation can be found in ``example.py``, which puts all these features together. It also uses command line parser to make the usage more convenient. E.g. it automatically loads previous instance if ``-- cont`` command line argument is used.
+An example of a complete implemenation can be found in `example.py`<https://github.com/fnechans/falconry/blob/master/example.py>_, which puts all these features together. It also uses command line parser to make the usage more convenient. E.g. it automatically loads previous instance if ``--cont`` command line argument is used.

@@ -13,11 +13,27 @@ log = logging.getLogger('falconry')
 class job:
     """Submits and holds a single job and all relevant information
 
+    The schedd can be imported as:
+
+    .. code-block:: python
+
+        from falconry import ScheddWrapper
+        schedd = ScheddWrapper()
+
+    or from the manager:
+
+    .. code-block:: python
+
+        from falconry import manager
+        mgr = manager.Manager(mgrDir, mgrMsg)
+        schedd = mgr.schedd
+
     Currently planning to keep single job per clusterID,
     since group submittion would significantly complicate resubmitting.
     HTCondor does not seem to allow for re-submittion of single ProcId,
     so one would have to first connect specific arguments to specific ProcIds
     and then resubmit individual jobs anyway.
+
 
     Arguments:
         name (str): name of the job for easy identification

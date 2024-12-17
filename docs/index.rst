@@ -18,5 +18,5 @@ Falconry is running on python 3 and can be found on `GitHub <https://github.com/
 
    usage/install
    usage/quickstart
-
-
+   usage/job
+   usage/manager
