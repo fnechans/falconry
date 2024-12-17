@@ -379,7 +379,7 @@ class manager:
         self._check_resubmit(j)
 
         # count job with different status
-        status = j._get_status()
+        status = j.get_status()
         if status == 9 or status == 10:
             c.notSub += 1
         elif status == 1:
