@@ -7,7 +7,7 @@ from typing import List, Dict, Any
 from . import translate
 from .schedd_wrapper import ScheddWrapper
 
-log = logging.getLogger(__name__)
+log = logging.getLogger('falconry')
 
 
 class job:
@@ -101,7 +101,9 @@ class job:
         if len(self.clusterIDs):
             self.htjob = htcondor.Submit(self.config)
             self.clusterID = self.clusterIDs[-1]
-            self.logFile = self.config["log"].replace("$(ClusterId)", str(self.clusterIDs[-1]))
+            self.logFile = self.config["log"].replace("$(ClusterId)", str(self.clusterID))
+            self.outFile = self.config["output"].replace("$(ClusterId)", str(self.clusterID))
+            self.errFile = self.config["error"].replace("$(ClusterId)", str(self.clusterID))
             self.submitted = True
 
     # reset job flags
@@ -144,7 +146,9 @@ class job:
         self.clusterIDs.append(self.clusterID)
         log.info("Submitting job %s with id %s", self.name, self.clusterID)
         log.debug(self.config)
-        self.logFile = self.config["log"].replace("$(ClusterId)", str(self.clusterIDs[-1]))
+        self.logFile = self.config["log"].replace("$(ClusterId)", str(self.clusterID))
+        self.outFile = self.config["output"].replace("$(ClusterId)", str(self.clusterID))
+        self.errFile = self.config["error"].replace("$(ClusterId)", str(self.clusterID))
 
         # reset job properties
         self.reset()

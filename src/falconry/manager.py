@@ -6,6 +6,7 @@ import shutil
 import sys
 import traceback
 import datetime  # so user knowns the time of last check
+from time import sleep
 
 from typing import Dict, Any, Tuple, Optional
 
@@ -14,7 +15,7 @@ from . import translate
 from . import cli
 from .schedd_wrapper import ScheddWrapper
 
-log = logging.getLogger(__name__)
+log = logging.getLogger('falconry')
 
 
 class counter:
@@ -190,6 +191,17 @@ class manager:
                 sys.exit(1)
 
     # print names of all failed jobs
+    def print_running(self, printLogs: bool = False):
+        log.info("Printing running jobs:")
+        for name, j in self.jobs.items():
+            if j.get_status() == 2:
+                log.info("%s (id %u)", name, j.clusterID)
+                if printLogs:
+                    log.info(f"log: {j.logFile}")
+                    log.info(f"out: {j.outFile}")
+                    log.info(f"err: {j.errFile}")
+
+    # print names of all failed jobs
     def print_failed(self, printLogs: bool = False):
         log.info("Printing failed jobs:")
         for name, j in self.jobs.items():
@@ -197,8 +209,8 @@ class manager:
                 log.info("%s (id %u)", name, j.clusterID)
                 if printLogs:
                     log.info(f"log: {j.logFile}")
-                    log.info(f"out: {j.config['output']}")
-                    log.info(f"err: {j.config['error']}")
+                    log.info(f"out: {j.outFile}")
+                    log.info(f"err: {j.errFile}")
         # TODO: maybe separate failed and removed?
         log.info("Printing removed jobs:")
         for name, j in self.jobs.items():
@@ -206,8 +218,8 @@ class manager:
                 log.info("%s (id %u)", name, j.clusterID)
                 if printLogs:
                     log.info(f"log: {j.logFile}")
-                    log.info(f"out: {j.config['output']}")
-                    log.info(f"err: {j.config['error']}")
+                    log.info(f"out: {j.outFile}")
+                    log.info(f"err: {j.errFile}")
 
     # check all tasks in queue whether the jobs they depend on already finished.
     # If some of them failed, add this task to the skipped.
@@ -276,6 +288,11 @@ class manager:
                 f"Error! Job {j.name} was not submitted succesfully (probably...), rerunning"
             )
             j.submit(force=True)
+        elif retryFailed and j.skipped:
+            log.warning(
+                f"Error! Job {j.name} was skipped and will be retried, rerunning"
+            )
+            j.skipped = False
 
     # resubmit jobs and find out state of the jobs
     def count_jobs(self, c: counter):
@@ -349,6 +366,7 @@ class manager:
 
             # only printout if something changed:
             if c != cOld:
+                sleep(0.2) # the printing sometimes breaks here, adding delay helps...
                 log.info(
                     "| nsub: {0:>4} | hold: {1:>5} | fail: {2:>6} | rem: {3:>6} | skip: {4:>5} |".format(
                         c.notSub, c.held, c.failed, c.removed, c.skipped
@@ -387,12 +405,15 @@ class manager:
         log.info("MONITOR: FINISHED")
 
     def cli_interface(self, sleep_time: int = 60):
+        print('>>>> ', end='', flush=True)
         state, var = cli.input_checker(
-            {"h": "", "s": "", "f": "", "x": "", "ff": "", "retry all": ""},
+            {"h": "", "s": "", "f": "", "x": "", "ff": "", "retry all": "", "r":"", "rr":""},
             silent=True,
             timeout=sleep_time,
         )
-        if state == cli.InputState.SUCCESS:
+        if state == cli.InputState.TIMEOUT:
+            print('\r    \r', end='', flush=True)
+        elif state == cli.InputState.SUCCESS:
             if var == "f":
                 self.print_failed()
             elif var == "s":
@@ -402,11 +423,18 @@ class manager:
                     "|-Enter 'f' to show failed jobs, 'ff' to also show log paths----------|"
                 )
                 log.info(
+                    "|-Enter 'r' to show running jobs, 'rr' to also show log paths---------|"
+                )
+                log.info(
                     "|-Enter 'x' to exit, 's' to save or 'retry all' to retry all failed---|"
                 )
                 self.cli_interface(sleep_time)
             elif var == "ff":
                 self.print_failed(True)
+            elif var == "r":
+                self.print_running()
+            elif var ==  "rr":
+                self.print_running(True)
             elif var == "x":
                 log.info("MONITOR: EXITING")
                 return

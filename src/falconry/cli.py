@@ -4,7 +4,7 @@ import logging
 from enum import Enum
 from typing import Dict, Optional, Tuple
 
-log = logging.getLogger(__name__)
+log = logging.getLogger('falconry')
 
 
 # helper class to define the status
