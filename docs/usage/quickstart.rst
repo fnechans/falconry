@@ -37,6 +37,8 @@ And then to submit the job simply::
 
     j.submit()
 
+More details on job setup can be found in the ``job`` module documentation.
+
 -------
 Manager
 -------
@@ -72,6 +74,8 @@ where the ``checkTime`` specifies time in seconds in between checks of job statu
 However, user may want to interupt the programm, or there may be a crash. In that case it may be usefull to use ``start_safe()`` function. It calls the ``save()`` function in case of interrupt or crash, which saves all managed jobs in a data.json file. To load previous instance of the manager then simply call::
 
     mgr.load()
+
+More details on manager setup can be found in the ``manager`` module documentation.
 
 ---------------
 Example program
