@@ -37,7 +37,7 @@ And then to submit the job simply::
 
     j.submit()
 
-More details on job setup can be found in the :ref:`job<_job>` module documentation.
+More details on job setup can be found in the :ref:`job` module documentation.
 
 -------
 Manager
@@ -75,10 +75,10 @@ However, user may want to interupt the programm, or there may be a crash. For th
 
     mgr.load()
 
-More details on manager setup can be found in the :ref:`manager<_manager>` module documentation.
+More details on manager setup can be found in the :ref:`manager` module documentation.
 
 ---------------
 Example program
 ---------------
 
-An example of a complete implemenation can be found in `example.py<https://github.com/fnechans/falconry/blob/master/example.py>`_, which puts all these features together. It also uses command line parser to make the usage more convenient. E.g. it automatically loads previous instance if ``--cont`` command line argument is used.
+An example of a complete implemenation can be found in `example.py <https://github.com/fnechans/falconry/blob/master/example.py>`_, which puts all these features together. It also uses command line parser to make the usage more convenient. E.g. it automatically loads previous instance if ``--cont`` command line argument is used.
