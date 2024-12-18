@@ -6,6 +6,8 @@
 ## Introduction
 
 Falconry is lightweight python package to create and manage your [HTCondor](https://github.com/htcondor/) jobs.
+It handles things like job submission, dependent jobs, and job status checking. It periodically saves progress,
+so even if you disconnect or htcondor crashes, you can continue where you left off.
 
 Detailed documentation can be found on [ReadTheDocs](https://falconry.readthedocs.io/en/latest/index.html). You can also check `example.py` for an example of usage. Package has to be first installed using pip as described in section on [installation](#installation-using-pip).
 
