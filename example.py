@@ -20,7 +20,7 @@ def config():
 
 def main():
 
-    # getting command line arguments and creating the manager
+    # Getting command line arguments and creating the manager
     # the manager will periodically check the jobs and handle dependencies
     cfg = config()
 
@@ -29,6 +29,7 @@ def main():
 
     mgr = manager(cfg.dir)  # the argument specifies where the job is saved
 
+    # It is alway useful to save the printounts to a log file
     file_handler = logging.FileHandler(cfg.dir + "/falconry.log", mode="a")
     dt_fmt = '%Y-%m-%d %H:%M:%S'
     formatter = logging.Formatter('[{asctime}] [{levelname:<8}] {name}: {message}', dt_fmt, style='{')
@@ -49,10 +50,10 @@ def main():
         return
 
     # Ask for message to be saved in the save file
-    # Alwayas good to have some documentation ...
+    # Always good to have some documentation ...
     mgr.ask_for_message()
 
-    # short function to simplify the job setup
+    # Short function to simplify the job setup
     def simple_job(name: str, exe: str) -> job:
         # define job and pass the HTCondor schedd to it
         j = job(name, mgr.schedd)
@@ -65,9 +66,10 @@ def main():
         return j
 
     if load:
+        # Continue where we left ...
         mgr.load()
     else:
-        # as a test, prepare one job which succeeds and one that fails
+        # As a test, prepare one job which succeeds and one that fails
         j = simple_job("success", "util/echoS.sh")
         # use job::submit to submit the job. With manager, this is not necessary,
         # when job does not have and dependency it is submitted automatically!
@@ -89,10 +91,11 @@ def main():
         j.add_job_dependency(*depE)
         mgr.add_job(j)
 
-    # start the manager
-    # if there is an error, especially interupt with keyboard,
-    # saves the current state of jobs
+    # Start the manager
+    # If there is an error, especially interupt with keyboard,
+    # it saves the current state of jobs
     mgr.start(60, gui=False)  # argument is interval between checking of the jobs
+    # Save the final status and print failed jobs
     mgr.save()
     mgr.print_failed()
 

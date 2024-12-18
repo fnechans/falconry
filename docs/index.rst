@@ -6,9 +6,9 @@
 Welcome to falconry's documentation!
 ====================================
 
-HTCondor is powerful tool for managment of jobs on computation clusters. It, and especially its python API, can be too complicated for an usual user.
+HTCondor is powerful tool for managment of jobs on computation clusters. It, and especially its python API, can be a bit complicated to use for an usual user.
 
-The goal of falconry is to have a lightweight wrapper around the HTCondor python API to run jobs. In addition, it offers a manager, which automatically control jobs, and is able to handle dependent jobs. This way one can submit large number of inter-connected jobs without having to manually run or check anything.
+The goal of falconry is to have a lightweight wrapper around the HTCondor python API to run jobs. In addition, it offers a manager, which automatically submits and controls jobs, and is able to handle dependent jobs. This way one can submit large number of inter-connected jobs without having to manually run or check anything.
 
 Falconry is running on python 3 and can be found on `GitHub <https://github.com/fnechans/falconry>`_.
 
