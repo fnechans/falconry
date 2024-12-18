@@ -4,11 +4,11 @@ build-backend = "hatchling.build"
 
 [project]
 name = "falconry"
-version = "0.1.0.post2"
+version = "0.1.1"
 authors = [
   { name="Filip Nechansky", email="filip.nechansky@protonmail.com" },
 ]
-description = "A small example package"
+description = "A lightweight python package to create and manage your HTCondor jobs."
 readme = "README.md"
 requires-python = ">=3.8"
 classifiers = [
