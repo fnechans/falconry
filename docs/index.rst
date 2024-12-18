@@ -10,7 +10,7 @@ HTCondor is powerful tool for managment of jobs on computation clusters. It, and
 
 The goal of falconry is to have a lightweight wrapper around the HTCondor python API to run jobs. In addition, it offers a manager, which automatically control jobs, and is able to handle dependent jobs. This way one can submit large number of inter-connected jobs without having to manually run or check anything.
 
-Falconry is running on python 3 and can be found on `GitHub <https://github.com/fnechans/falconry>`_.
+Falconry is running on python 3 and can be found on `GitHub<https://github.com/fnechans/falconry>`_.
 
 .. toctree::
    :maxdepth: 2
