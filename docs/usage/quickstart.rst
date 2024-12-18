@@ -10,10 +10,10 @@ Basic unit of the falconry is a job, which simply mantains all properties and su
 
     from falconry import job
 
-Jobs require an HTCondor schedd. There is more convenient way to acquire it in the ``manager`` class mentioned later on, for now let's start with proper HTCondor python API setup::
+Jobs require an HTCondor schedd. There is more convenient way to acquire it in the ``manager`` class mentioned later on, for now let's set it up directly::
 
-    import htcondor
-    schedd = htcondor.Schedd()
+    from falconry import ScheddWrapper
+    schedd = ScheddWrapper()
 
 which should automatically pick-up the local schedd. The job definition then needs a name - useful for identification with a larger number of jobs - and the schedd::
 
@@ -81,4 +81,4 @@ More details on manager setup can be found in the :ref:`manager<_manager>` modul
 Example program
 ---------------
 
-An example of a complete implemenation can be found in `example.py`<https://github.com/fnechans/falconry/blob/master/example.py>_, which puts all these features together. It also uses command line parser to make the usage more convenient. E.g. it automatically loads previous instance if ``--cont`` command line argument is used.
+An example of a complete implemenation can be found in `example.py<https://github.com/fnechans/falconry/blob/master/example.py>`_, which puts all these features together. It also uses command line parser to make the usage more convenient. E.g. it automatically loads previous instance if ``--cont`` command line argument is used.
