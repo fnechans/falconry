@@ -21,7 +21,7 @@ log = logging.getLogger('falconry')
 
 class counter:
     # just holds few variables used in status print
-    def __init__(self):
+    def __init__(self) -> None:
         self.waiting = 0
         self.notSub = 0
         self.idle = 0
@@ -32,7 +32,9 @@ class counter:
         self.removed = 0
         self.held = 0
 
-    def __eq__(self, other):
+    def __eq__(self, other: "object") -> bool:
+        if not isinstance(other, counter):
+            return False
         return self.__dict__ == other.__dict__
 
 
@@ -93,7 +95,7 @@ class manager:
             return False, var
         return True, "n"  # automatically assume new
 
-    def ask_for_message(self):
+    def ask_for_message(self) -> None:
         """Asks user for a message to be saved in the save file for bookkeeping."""
 
         log.info("Enter a message to be saved in the save file " "for bookkeeping.")
@@ -101,7 +103,7 @@ class manager:
         if i:
             self.mgrMsg = sys.stdin.readline().strip()
 
-    def add_job(self, j: job, update: bool = False):
+    def add_job(self, j: job, update: bool = False) -> None:
         """Adds a job to the manager. If the job already exists and `update` is
         `True`, it will be updated.
 
@@ -125,7 +127,7 @@ class manager:
 
         self.jobs[j.name] = j
 
-    def save(self, quiet: bool = False):
+    def save(self, quiet: bool = False) -> None:
         """Saves the current status of the jobs to a json file.
 
         If `quiet` is `True`, it will not print any messages and
@@ -165,7 +167,7 @@ class manager:
             os.remove(self.saveFileName)
         os.symlink(fileLatest.split("/")[-1], self.saveFileName)
 
-    def load(self, retryFailed: bool = False):
+    def load(self, retryFailed: bool = False) -> None:
         """Loads the saved status of the jobs from a json file
         provided by the user.
 
@@ -219,7 +221,7 @@ class manager:
                 sys.exit(1)
 
     # print names of all failed jobs
-    def print_running(self, printLogs: bool = False):
+    def print_running(self, printLogs: bool = False) -> None:
         log.info("Printing running jobs:")
         for name, j in self.jobs.items():
             if j.get_status() == 2:
@@ -230,7 +232,7 @@ class manager:
                     log.info(f"err: {j.errFile}")
 
     # print names of all failed jobs
-    def print_failed(self, printLogs: bool = False):
+    def print_failed(self, printLogs: bool = False) -> None:
         """Prints names of all failed jobs.
 
         Arguments:
@@ -255,7 +257,7 @@ class manager:
                     log.info(f"out: {j.outFile}")
                     log.info(f"err: {j.errFile}")
 
-    def _check_dependence(self):
+    def _check_dependence(self) -> None:
         """Checks if all dependencies of a job are done. If so, it will submit
         the job. If any of the dependencies failed, it will add the job to the
         skipped list.
@@ -298,7 +300,7 @@ class manager:
                 j.submit()
                 self.curJobIdle += 1  # Add the jobs as a idle for now
 
-    def _check_resubmit(self, j: job, retryFailed: bool = False):
+    def _check_resubmit(self, j: job, retryFailed: bool = False) -> None:
         """Checks if a job should be resubmitted due to some known problems.
 
         Arguments:
@@ -336,7 +338,7 @@ class manager:
             )
             j.skipped = False
 
-    def _count_jobs(self, c: counter):
+    def _count_jobs(self, c: counter) -> None:
         """Counts the number of jobs with different status.
         Resubmits jobs which failed due to condor problems.
 
@@ -355,7 +357,7 @@ class manager:
 
             print(" " * maxLength + "\r", flush=True, end='')
 
-    def _count_job(self, c: counter, j: job):
+    def _count_job(self, c: counter, j: job) -> None:
         """Updates the counter object with the status of a single job.
         Also resubmits jobs which failed due to condor problems.
 
@@ -395,7 +397,7 @@ class manager:
         elif status == 3:
             c.removed += 1
 
-    def _start_cli(self, sleep_time: int = 60):
+    def _start_cli(self, sleep_time: int = 60) -> None:
         """Starts the manager, iteratively checking status of jobs.
 
         Arguments:
@@ -462,7 +464,7 @@ class manager:
 
         log.info("MONITOR: FINISHED")
 
-    def _cli_interface(self, sleep_time: int = 60):
+    def _cli_interface(self, sleep_time: int = 60) -> None:
         """CLI interface for the manager.
 
         Arguments:
@@ -515,7 +517,7 @@ class manager:
                 for j in self.jobs.values():
                     self._check_resubmit(j, True)
 
-    def _start_gui(self, sleepTime: int = 60):
+    def _start_gui(self, sleepTime: int = 60) -> None:
         """Starts the manager with GUI, iteratively checking status of jobs.
 
         This is only experimental!
@@ -532,7 +534,7 @@ class manager:
         window.title("Falconry monitor")
         frm_counter = tk.Frame()
 
-        def quick_label(name: str, x: int, y: int = 0):
+        def quick_label(name: str, x: int, y: int = 0) -> tk.Label:
             lbl = tk.Label(master=frm_counter, width=10, text=name)
             lbl.grid(row=y, column=x)
             return lbl
@@ -557,7 +559,7 @@ class manager:
 
         frm_counter.grid(row=0, column=0)
 
-        def tk_count():
+        def tk_count() -> None:
             c = counter()
             self._count_jobs(c)
             labels["ns"]["text"] = f"{c.notSub}"
@@ -584,7 +586,7 @@ class manager:
         window.mainloop()
         log.info("MONITOR: FINISHED")
 
-    def start(self, sleepTime: int = 60, gui: bool = False):
+    def start(self, sleepTime: int = 60, gui: bool = False) -> None:
         """Starts the manager, iteratively checking status of jobs.
 
         Makes sure to save the current state of jobs
@@ -614,7 +616,7 @@ class manager:
             self.print_failed()
             sys.exit(1)
 
-    def start_safe(self, sleepTime: int = 60, gui: bool = False):
+    def start_safe(self, sleepTime: int = 60, gui: bool = False) -> None:
         """Deprecated! Use `start` instead!"""
         log.warning(
             "IMPORTANT! `start_safe` is now renamed as `start`. "

@@ -60,7 +60,7 @@ class job:
         # to setup initial state (done/submitted and so on)
         self.reset()
 
-    def set_simple(self, exe: str, logPath: str):
+    def set_simple(self, exe: str, logPath: str) -> None:
         """Sets up a simple job with only executable and a path to log files
 
         Arguments:
@@ -295,7 +295,7 @@ class job:
             return cndr_status
 
         log.error("Unknown output of job %s!", self.name)
-        return 0
+        return 126
 
     def _get_status_condor(self) -> int:
         """Returns status of the job, as defined in condor
