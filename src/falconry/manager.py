@@ -12,7 +12,7 @@ from time import sleep
 from typing import Dict, Any, Tuple, Optional
 
 from .job import job
-from . import translate
+from .status import FalconryStatus
 from . import cli
 from .schedd_wrapper import ScheddWrapper
 
@@ -224,7 +224,7 @@ class manager:
     def print_running(self, printLogs: bool = False) -> None:
         log.info("Printing running jobs:")
         for name, j in self.jobs.items():
-            if j.get_status() == 2:
+            if j.get_status() == FalconryStatus.RUNNING:
                 log.info("%s (id %u)", name, j.clusterID)
                 if printLogs:
                     log.info(f"log: {j.logFile}")
@@ -241,7 +241,7 @@ class manager:
         """
         log.info("Printing failed jobs:")
         for name, j in self.jobs.items():
-            if j.get_status() < 0:
+            if j.get_status() == FalconryStatus.FAILED:
                 log.info("%s (id %u)", name, j.clusterID)
                 if printLogs:
                     log.info(f"log: {j.logFile}")
@@ -250,7 +250,7 @@ class manager:
         # TODO: maybe separate failed and removed?
         log.info("Printing removed jobs:")
         for name, j in self.jobs.items():
-            if j.get_status() == 3:
+            if j.get_status() == FalconryStatus.REMOVED:
                 log.info("%s (id %u)", name, j.clusterID)
                 if printLogs:
                     log.info(f"log: {j.logFile}")
@@ -285,9 +285,9 @@ class manager:
                     j.skipped = True
 
                 status = tarJob.get_status()
-                if status == 3:
+                if status == FalconryStatus.REMOVED:
                     log.error(
-                        f"Job {name} depends on job {tarJob.name} which is {translate.statusMessage[status]}! Skipping ..."
+                        f"Job {name} depends on job {tarJob.name} which is {FalconryStatus.REMOVED}! Skipping ..."
                     )
                     j.skipped = True
 
@@ -309,24 +309,30 @@ class manager:
                 Defaults to False.
         """
         status = j.get_status()
-        if status > 0:
-            log.debug("Job %s has status %s", j.name, translate.statusMessage[status])
-        if status == 12:
+        log.debug("Job %s has status %s", j.name, status.name)
+        if status is FalconryStatus.ABORTED_BY_USER:
             log.warning(
                 f"Error! Job {j.name} (id {j.clusterID}) failed due to condor, rerunning"
             )
             j.submit(force=True)
-        elif retryFailed and status < 0:
+        elif retryFailed and status is FalconryStatus.FAILED:
             log.warning(
                 f"Error! Job {j.name} (id {j.clusterID}) failed and will be retried, rerunning"
             )
             j.submit(force=True)
-        elif retryFailed and status == 3:
+        elif retryFailed and status is FalconryStatus.REMOVED:
             log.warning(
                 f"Error! Job {j.name} (id {j.clusterID}) was removed and will be retried, rerunning"
             )
             j.submit(force=True)
-        elif retryFailed and j.submitted and (status == 9 or status == 10):
+        elif (
+            retryFailed
+            and j.submitted
+            and (
+                status
+                in [FalconryStatus.NOT_SUBMITTED, FalconryStatus.LOG_FILE_MISSING]
+            )
+        ):
             log.warning(
                 f"Error! Job {j.name} was not submitted succesfully (probably...), rerunning"
             )
@@ -382,19 +388,19 @@ class manager:
 
         # count job with different status
         status = j.get_status()
-        if status == 9 or status == 10:
+        if status == FalconryStatus.NOT_SUBMITTED or status == FalconryStatus.LOG_FILE_MISSING:
             c.notSub += 1
-        elif status == 1:
+        elif status == FalconryStatus.IDLE:
             c.idle += 1
-        elif status == 2:
+        elif status == FalconryStatus.RUNNING:
             c.run += 1
-        elif status < 0:
+        elif status == FalconryStatus.FAILED:
             c.failed += 1
-        elif status == 4:
+        elif status == FalconryStatus.COMPLETE:
             c.done += 1
-        elif status == 5:
+        elif status == FalconryStatus.HELD:
             c.held += 1
-        elif status == 3:
+        elif status == FalconryStatus.REMOVED:
             c.removed += 1
 
     def _start_cli(self, sleep_time: int = 60) -> None:
