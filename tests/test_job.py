@@ -1,7 +1,6 @@
 # Test job.py using the htcondor_mock library
-from . import MockHTCondor
-from falconry import job
-
+from MockHTCondor import MockHTCondor
+from falconry import job, manager, Counter
 import pytest
 
 
@@ -49,3 +48,31 @@ def test_job():
 
     assert j.get_info()["JobStatus"] == 4
     assert j.get_info()["JobStatus"] == j.get_status()
+
+
+def test_manager():
+    schedd = MockHTCondor.Schedd()
+    mgr = manager("log")
+    mgr.schedd = schedd
+
+    j = job("test", schedd)
+    j.set_simple("my_script.sh", "log")
+    mgr.add_job(j)
+
+    c = Counter()
+
+    assert mgr._single_check(c) is True
+    assert j.get_info()["JobStatus"] == 1
+    schedd.run_jobs()
+    assert mgr._single_check(c) is True
+    assert j.get_info()["JobStatus"] == 2
+    schedd.complete_jobs()
+    assert mgr._single_check(c) is False
+    assert j.get_info()["JobStatus"] == 4
+    mgr.save(quiet=True)
+    mgr.load(retryFailed=False)
+
+
+if __name__ == "__main__":
+    test_job()
+    test_manager()

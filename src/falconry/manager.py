@@ -19,7 +19,7 @@ from .schedd_wrapper import ScheddWrapper
 log = logging.getLogger('falconry')
 
 
-class counter:
+class Counter:
     # just holds few variables used in status print
     def __init__(self) -> None:
         self.waiting = 0
@@ -33,7 +33,7 @@ class counter:
         self.held = 0
 
     def __eq__(self, other: "object") -> bool:
-        if not isinstance(other, counter):
+        if not isinstance(other, Counter):
             return False
         return self.__dict__ == other.__dict__
 
@@ -176,7 +176,7 @@ class manager:
             Defaults to False.
         """
         log.info("Loading past status of jobs")
-        with open(self.dir + "/data.json", "r") as f:
+        with open(self.dir + "/data.json", "rb") as f:
             depNames = {}
             for name, jobDict in ijson.kvitems(f, ""):
                 if name in manager.reservedNames:
@@ -338,7 +338,7 @@ class manager:
             )
             j.skipped = False
 
-    def _count_jobs(self, c: counter) -> None:
+    def _count_jobs(self, counter: Counter) -> None:
         """Counts the number of jobs with different status.
         Resubmits jobs which failed due to condor problems.
 
@@ -353,11 +353,11 @@ class manager:
                 maxLength = len(printStr)
             print(printStr, end='')
 
-            self._count_job(c, j)
+            self._count_job(counter, j)
 
             print(" " * maxLength + "\r", flush=True, end='')
 
-    def _count_job(self, c: counter, j: job) -> None:
+    def _count_job(self, c: Counter, j: job) -> None:
         """Updates the counter object with the status of a single job.
         Also resubmits jobs which failed due to condor problems.
 
@@ -408,50 +408,11 @@ class manager:
 
         log.info("MONITOR: START")
 
-        c = counter()
+        c = Counter()
         event_counter = 0
         while True:
-
-            log.info(
-                f"|-Checking status of jobs [{datetime.datetime.now()}]----------------|",
-            )
-
-            cOld = c
-            c = counter()
-            self._count_jobs(c)
-
-            # if no job is waiting nor running, finish the manager
-            if not (c.waiting + c.notSub + c.idle + c.run > 0):
+            if not self._single_check(c):
                 break
-
-            # only printout if something changed:
-            if c != cOld:
-                sleep(0.2)  # the printing sometimes breaks here, adding delay helps...
-                log.info(
-                    "| nsub: {0:>4} | hold: {1:>5} | fail: {2:>6} | rem: {3:>6} | skip: {4:>5} |".format(
-                        c.notSub, c.held, c.failed, c.removed, c.skipped
-                    )
-                )
-                log.info(
-                    "| wait: {0:>6} | idle: {1:>4} | RUN: {2:>5} | DONE: {3:>6} | TOT: {4:>6} |".format(
-                        c.waiting, c.idle, c.run, c.done, len(self.jobs)
-                    )
-                )
-
-                # Update current idle of jobs managed by manager.
-                # All new jobs submitted jobs in `check_dependence`
-                # will increase this number, that why we create different
-                # variable than `c.idle`
-                self.curJobIdle = c.idle
-
-                # checking dependencies and submitting ready jobs
-                self._check_dependence()
-                self.save(quiet=True)
-
-                # instead of sleeping wait for input
-                log.info(
-                    "|-Enter 'h' to show all commands, e.g. to resubmit or show failed jobs|"
-                )
 
             # save with timestamp every 30 events
             # most important for first event when first
@@ -463,6 +424,55 @@ class manager:
             self._cli_interface(sleep_time)
 
         log.info("MONITOR: FINISHED")
+
+    def _single_check(self, c: Counter) -> bool:
+        """Single check in the manager loop.
+
+        Returns:
+            bool: True if manager should continue, False otherwise
+        """
+        log.info(
+            f"|-Checking status of jobs [{datetime.datetime.now()}]----------------|",
+        )
+
+        cOld = c
+        c = Counter()
+        self._count_jobs(c)
+
+        # if no job is waiting nor running, finish the manager
+        if not (c.waiting + c.notSub + c.idle + c.run > 0):
+            return False
+
+        # only printout if something changed:
+        if c != cOld:
+            sleep(0.2)  # the printing sometimes breaks here, adding delay helps...
+            log.info(
+                "| nsub: {0:>4} | hold: {1:>5} | fail: {2:>6} | rem: {3:>6} | skip: {4:>5} |".format(
+                    c.notSub, c.held, c.failed, c.removed, c.skipped
+                )
+            )
+            log.info(
+                "| wait: {0:>6} | idle: {1:>4} | RUN: {2:>5} | DONE: {3:>6} | TOT: {4:>6} |".format(
+                    c.waiting, c.idle, c.run, c.done, len(self.jobs)
+                )
+            )
+
+            # Update current idle of jobs managed by manager.
+            # All new jobs submitted jobs in `check_dependence`
+            # will increase this number, that why we create different
+            # variable than `c.idle`
+            self.curJobIdle = c.idle
+
+            # checking dependencies and submitting ready jobs
+            self._check_dependence()
+            self.save(quiet=True)
+
+            # instead of sleeping wait for input
+            log.info(
+                "|-Enter 'h' to show all commands, e.g. to resubmit or show failed jobs|"
+            )
+
+        return True
 
     def _cli_interface(self, sleep_time: int = 60) -> None:
         """CLI interface for the manager.
@@ -560,7 +570,7 @@ class manager:
         frm_counter.grid(row=0, column=0)
 
         def tk_count() -> None:
-            c = counter()
+            c = Counter()
             self._count_jobs(c)
             labels["ns"]["text"] = f"{c.notSub}"
             labels["i"]["text"] = f"{c.idle}"
