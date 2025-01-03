@@ -29,3 +29,17 @@ dependencies = [
 Documentation = "https://falconry.readthedocs.io/en/stable/"
 Repository = "https://github.com/fnechans/falconry"
 Issues = "https://github.com/fnechans/falconry/issues"
+
+[tool.hatch.build.targets.sdist]
+# hatchling always includes:
+# pyproject.toml, .gitignore, any README, any LICENSE, AUTHORS
+only-include = [
+    "/src",
+    "/tests",
+    "/util",
+    "/example.py",
+]
+
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/falconry"]
