@@ -29,11 +29,13 @@ jobs:
 
   publish-to-testpypi:
     name: Publish Python 🐍 distribution 📦 to TestPyPI
-    # if: startsWith(github.ref, 'refs/tags/')  # only publish to PyPI on tag pushes
+    # only on master
+    if: github.ref == 'refs/heads/master'
     needs:
     - build
     runs-on: ubuntu-latest
 
+    # This environment requires manual approval
     environment:
       name: testpypi
       url: https://test.pypi.org/p/falconry

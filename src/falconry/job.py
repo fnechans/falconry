@@ -4,7 +4,7 @@ import logging
 
 from typing import List, Dict, Any
 
-from . import translate
+from .status import FalconryStatus
 from .schedd_wrapper import ScheddWrapper
 
 log = logging.getLogger('falconry')
@@ -60,7 +60,7 @@ class job:
         # to setup initial state (done/submitted and so on)
         self.reset()
 
-    def set_simple(self, exe: str, logPath: str):
+    def set_simple(self, exe: str, logPath: str) -> None:
         """Sets up a simple job with only executable and a path to log files
 
         Arguments:
@@ -133,7 +133,7 @@ class job:
         self.clusterIDs = jobDict["clusterIDs"]
         # if not empty, the job has been already submitted at least once
         if len(self.clusterIDs):
-            self.htjob = htcondor.Submit(self.config)
+            self.htjob = htcondor.Submit(self.config)  # type: ignore
             self.clusterID = self.clusterIDs[-1]
             self.logFile = self.config["log"].replace(
                 "$(ClusterId)", str(self.clusterID)
@@ -180,16 +180,18 @@ class job:
         # first check if job was not submitted before:
         if not force and self.clusterIDs != []:
             status = self.get_status()
-            if status == 12 or status < 0 or status == 10:
+            if status in [
+                FalconryStatus.ABORTED_BY_USER,
+                FalconryStatus.FAILED,
+                FalconryStatus.LOG_FILE_MISSING,
+            ]:
                 log.info("Job %s failed and will be resubmitted.", self.name)
             else:
-                log.info(
-                    "The job is %s, not submitting", translate.statusMessage[status]
-                )
+                log.info("The job is %s, not submitting", status.name)
                 return
         else:
             # the htcondor version of the configuration
-            self.htjob = htcondor.Submit(self.config)
+            self.htjob = htcondor.Submit(self.config)  # type: ignore
 
         # Of course the submit has different capitalization here ...
         self.submit_result = self.schedd.submit(self.htjob)
@@ -213,7 +215,7 @@ class job:
         if self.clusterIDs == []:
             return False
         self.schedd.act(
-            htcondor.JobAction.Release, "ClusterId == " + str(self.clusterID)
+            htcondor.JobAction.Release, "ClusterId == " + str(self.clusterID)  # type: ignore
         )
         log.info("Releasing job %s with id %s", self.name, self.clusterID)
         return True
@@ -223,7 +225,7 @@ class job:
         if self.clusterIDs == []:
             return False
         self.schedd.act(
-            htcondor.JobAction.Remove, "ClusterId == " + str(self.clusterID)
+            htcondor.JobAction.Remove, "ClusterId == " + str(self.clusterID)  # type: ignore
         )
         log.info("Removing job %s with id %s", self.name, self.clusterID)
         return True
@@ -268,8 +270,8 @@ class job:
 
         return ads[0]  # we take only single job, so return onl the first eleement
 
-    def get_status(self) -> int:
-        """Returns status of the job, as defined in translate.py
+    def get_status(self) -> FalconryStatus:
+        """Returns status of the job, as defined in status.py
 
         Returns:
             int: status of the job
@@ -277,25 +279,27 @@ class job:
 
         # First check if the job is skipped or not even submitted
         if self.skipped:
-            return 8
+            return FalconryStatus.SKIPPED
         elif self.done:
-            return 4
+            return FalconryStatus.COMPLETE
         elif self.clusterIDs == []:  # job was not even submitted
-            return 9
+            return FalconryStatus.NOT_SUBMITTED
         elif not os.path.isfile(self.logFile):
-            return 10
+            return FalconryStatus.LOG_FILE_MISSING
 
         status_log = self._get_status_log()
         if status_log != 0:  # 0 for unknown so try from condor
-            return status_log
+            if status_log < 0:
+                return FalconryStatus.FAILED
+            return FalconryStatus(status_log)
 
         cndr_status = self._get_status_condor()
         # If job is incomplete, simply return the status:
         if cndr_status != 4 and cndr_status != -999:
-            return cndr_status
+            return FalconryStatus(cndr_status)
 
         log.error("Unknown output of job %s!", self.name)
-        return 0
+        return FalconryStatus.UNKNOWN
 
     def _get_status_condor(self) -> int:
         """Returns status of the job, as defined in condor

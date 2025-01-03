@@ -4,18 +4,17 @@ build-backend = "hatchling.build"
 
 [project]
 name = "falconry"
-version = "0.1.2"
+version = "0.1.2a1"
 authors = [
   { name="Filip Nechansky", email="filip.nechansky@protonmail.com" },
 ]
 description = "A lightweight python package to create and manage your HTCondor jobs."
 readme = "README.md"
-requires-python = ">=3.8"
+requires-python = ">=3.9"
 classifiers = [
     "Development Status :: 4 - Beta",
     "Programming Language :: Python :: 3",
     "License :: OSI Approved :: MIT License",
-    "Programming Language :: Python :: 3.8",
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
@@ -30,3 +29,17 @@ dependencies = [
 Documentation = "https://falconry.readthedocs.io/en/stable/"
 Repository = "https://github.com/fnechans/falconry"
 Issues = "https://github.com/fnechans/falconry/issues"
+
+[tool.hatch.build.targets.sdist]
+# hatchling always includes:
+# pyproject.toml, .gitignore, any README, any LICENSE, AUTHORS
+only-include = [
+    "/src",
+    "/tests",
+    "/util",
+    "/example.py",
+]
+
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/falconry"]
