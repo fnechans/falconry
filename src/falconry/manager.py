@@ -53,11 +53,20 @@ class manager:
 
     reservedNames = ["Message", "Command"]
 
-    def __init__(self, mgrDir: str, mgrMsg: str = "", maxJobIdle: int = -1):
+    def __init__(
+        self,
+        mgrDir: str,
+        mgrMsg: str = "",
+        maxJobIdle: int = -1,
+        schedd: Optional[ScheddWrapper] = None,
+    ):
         log.info("MONITOR: INIT")
 
         # Initialize the manager, maily getting the htcondor schedd
-        self.schedd = ScheddWrapper()
+        if schedd is not None:
+            self.schedd = schedd
+        else:
+            self.schedd = ScheddWrapper()
 
         # job collection
         self.jobs: Dict[str, job] = {}
@@ -388,7 +397,10 @@ class manager:
 
         # count job with different status
         status = j.get_status()
-        if status == FalconryStatus.NOT_SUBMITTED or status == FalconryStatus.LOG_FILE_MISSING:
+        if (
+            status == FalconryStatus.NOT_SUBMITTED
+            or status == FalconryStatus.LOG_FILE_MISSING
+        ):
             c.notSub += 1
         elif status == FalconryStatus.IDLE:
             c.idle += 1

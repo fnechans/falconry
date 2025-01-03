@@ -52,8 +52,7 @@ def test_job():
 
 def test_manager():
     schedd = MockHTCondor.Schedd()
-    mgr = manager("log")
-    mgr.schedd = schedd  # type: ignore
+    mgr = manager("log", schedd=schedd)  # type: ignore
 
     j = job("test", schedd)  # type: ignore
     j.set_simple("my_script.sh", "log")
