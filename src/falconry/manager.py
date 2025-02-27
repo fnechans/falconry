@@ -439,7 +439,8 @@ class manager:
                 self.save()
             event_counter += 1
 
-            self._cli_interface(sleep_time)
+            if not self._cli_interface(sleep_time):
+                break
 
         log.info("MONITOR: FINISHED")
 
@@ -492,12 +493,25 @@ class manager:
 
         return True
 
-    def _cli_interface(self, sleep_time: int = 60) -> None:
+    def _cli_interface(self, sleep_time: int = 60) -> bool:
         """CLI interface for the manager.
+\
+        Possible commands:
+            f: show failed jobs
+            ff: show failed jobs and log paths
+            s: save manager state
+            r: show running jobs
+            rr: show running jobs and log paths
+            x: exit
+            h: help
+
 
         Arguments:
             sleep_time (int, optional): time to sleep between checks.
                 Defaults to 60.
+
+        Returns:
+            bool: True if manager should continue, False otherwise
         """
         print('>>>> ', end='', flush=True)
         state, var = cli.input_checker(
@@ -540,10 +554,12 @@ class manager:
                 self.print_running(True)
             elif var == "x":
                 log.info("MONITOR: EXITING")
-                return
+                return False
             elif var == "retry all":
                 for j in self.jobs.values():
                     self._check_resubmit(j, True)
+
+        return True
 
     def _start_gui(self, sleepTime: int = 60) -> None:
         """Starts the manager with GUI, iteratively checking status of jobs.

@@ -69,9 +69,18 @@ Now, start the manager with following command::
 
     mgr.start(checkTime)
 
-where the ``checkTime`` specifies time in seconds in between checks of job status. After each interval, it will print status of each jobs and submit those waiting in queue if dependencies are satisfied.
+where the ``checkTime`` specifies time in seconds in between checks of job status. After each interval, it will print status of each job and submit those waiting in queue if dependencies are satisfied.
 
-However, user may want to interupt the programm, or there may be a crash. For that reason falconry periodically saves all managed jobs in a data.json file via ``save()`` function of the manager. To load previous instance of the manager then simply call::
+The manager also has a simple interface to allow print running or failed jobs, save state, or exit:
+* f: show failed jobs
+* ff: show failed jobs and log paths
+* s: save manager state
+* r: show running jobs
+* rr: show running jobs and log paths
+* x: exit
+* h: help
+
+User may want to interupt the program, or there may be a crash. For that reason falconry periodically saves all managed jobs in a data.json file via ``save()`` function of the manager. To load previous instance of the manager then simply call::
 
     mgr.load()
 

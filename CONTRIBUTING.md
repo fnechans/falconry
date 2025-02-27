@@ -14,6 +14,10 @@ Any other problems, those do not cause pipeline to fail, only show warning:
 
     python3 -m  flake8 . --count --statistics
 
-And finally mypy for type errors:
+Use mypy for type errors:
 
     python3 -m mypy
+
+And finally pytest to run unit tests:
+
+    python3 -m pytest
