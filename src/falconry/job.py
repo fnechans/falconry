@@ -67,18 +67,20 @@ class job:
             exe (str): path to the executable
             logPath (str): path to the log files
         """
+        # Extend the log path
+        logPathBase = os.path.abspath(logPath)
+        logDir = os.path.join(logPathBase, self.name)
 
         # htcondor defines job as a dict
         cfg = {
             "executable": exe,
-            "output": logPath + "/" + self.name + "/$(ClusterId).out",
-            "error": logPath + "/" + self.name + "/$(ClusterId).err",
-            "log": logPath + "/" + self.name + "/$(ClusterId).log",
+            "output": os.path.join(logDir, "$(ClusterId).out"),
+            "error": os.path.join(logDir, "$(ClusterId).err"),
+            "log": os.path.join(logDir, "$(ClusterId).log"),
         }
         self.config = cfg
 
         # create the directory for the log
-        logDir = os.getcwd() + "/" + logPath + "/" + self.name + "/"
         if not os.path.exists(logDir):
             os.makedirs(logDir)
 
