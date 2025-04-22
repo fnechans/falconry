@@ -8,6 +8,7 @@ import traceback
 import datetime
 import select
 from time import sleep
+import htcondor
 
 from typing import Dict, Any, Tuple, Optional
 
@@ -70,6 +71,7 @@ class manager:
 
         # job collection
         self.jobs: Dict[str, job] = {}
+        self.sub_queue: list[job] = []
 
         # now create a directory where the info about jobs will be save
         if not os.path.exists(mgrDir):
@@ -234,7 +236,7 @@ class manager:
         log.info("Printing running jobs:")
         for name, j in self.jobs.items():
             if j.get_status() == FalconryStatus.RUNNING:
-                log.info("%s (id %u)", name, j.clusterID)
+                log.info("%s (id %u)", name, j.jobID)
                 if printLogs:
                     log.info(f"log: {j.logFile}")
                     log.info(f"out: {j.outFile}")
@@ -251,7 +253,7 @@ class manager:
         log.info("Printing failed jobs:")
         for name, j in self.jobs.items():
             if j.get_status() == FalconryStatus.FAILED:
-                log.info("%s (id %u)", name, j.clusterID)
+                log.info(f"{name} (id {j.jobID})")
                 if printLogs:
                     log.info(f"log: {j.logFile}")
                     log.info(f"out: {j.outFile}")
@@ -260,7 +262,7 @@ class manager:
         log.info("Printing removed jobs:")
         for name, j in self.jobs.items():
             if j.get_status() == FalconryStatus.REMOVED:
-                log.info("%s (id %u)", name, j.clusterID)
+                log.info(f"{name} (id {j.jobID})")
                 if printLogs:
                     log.info(f"log: {j.logFile}")
                     log.info(f"out: {j.outFile}")
@@ -306,7 +308,8 @@ class manager:
                 # Check if we did not reach maximum number of submitted jobs
                 if self.maxJobIdle != -1 and self.curJobIdle > self.maxJobIdle:
                     break  # break because it does not make sense to check any other jobs now
-                j.submit()
+                j.submit(doNotSubmit=True)
+                self.sub_queue.append(j)
                 self.curJobIdle += 1  # Add the jobs as a idle for now
 
     def _check_resubmit(self, j: job, retryFailed: bool = False) -> None:
@@ -321,19 +324,22 @@ class manager:
         log.debug("Job %s has status %s", j.name, status.name)
         if status is FalconryStatus.ABORTED_BY_USER:
             log.warning(
-                f"Error! Job {j.name} (id {j.clusterID}) failed due to condor, rerunning"
+                f"Error! Job {j.name} (id {j.jobID}) failed due to condor, rerunning"
             )
-            j.submit(force=True)
+            j.submit(force=True, doNotSubmit=True)
+            self.sub_queue.append(j)
         elif retryFailed and status is FalconryStatus.FAILED:
             log.warning(
-                f"Error! Job {j.name} (id {j.clusterID}) failed and will be retried, rerunning"
+                f"Error! Job {j.name} (id {j.jobID}) failed and will be retried, rerunning"
             )
-            j.submit(force=True)
+            j.submit(force=True, doNotSubmit=True)
+            self.sub_queue.append(j)
         elif retryFailed and status is FalconryStatus.REMOVED:
             log.warning(
-                f"Error! Job {j.name} (id {j.clusterID}) was removed and will be retried, rerunning"
+                f"Error! Job {j.name} (id {j.jobID}) was removed and will be retried, rerunning"
             )
-            j.submit(force=True)
+            j.submit(force=True, doNotSubmit=True)
+            self.sub_queue.append(j)
         elif (
             retryFailed
             and j.submitted
@@ -345,8 +351,8 @@ class manager:
             log.warning(
                 f"Error! Job {j.name} was not submitted succesfully (probably...), rerunning"
             )
-            j.submit(force=True)
-
+            j.submit(force=True, doNotSubmit=True)
+            self.sub_queue.append(j)
         elif retryFailed and j.skipped:
             log.warning(
                 f"Error! Job {j.name} was skipped and will be retried, rerunning"
@@ -415,6 +421,60 @@ class manager:
         elif status == FalconryStatus.REMOVED:
             c.removed += 1
 
+    def _submit_jobs(self) -> None:
+        """Submits all jobs in the submission queue."""
+
+        if len(self.sub_queue) == 0:
+            return
+
+        # First we need to group jobs with the same executable
+        jobs_with_exe: Dict[str, list[job]] = {}
+        for j in self.sub_queue:
+            exe = j.config["executable"]
+            if exe not in jobs_with_exe:
+                jobs_with_exe[exe] = []
+            # check that the log path is the same. This should be the case by default
+            elif j.config["log"] != jobs_with_exe[exe][0].config["log"]:
+                log.error("Jobs with same executable have different log paths")
+                raise Exception
+            jobs_with_exe[exe].append(j)
+
+        ignore = ["executable", "log", "output", "error"]
+        # Now we need to submit each group
+        for exe, jobs in jobs_with_exe.items():
+            #
+            log.debug("Submitting %i jobs with executable %s", len(jobs), exe)
+
+            job_pars = [x.config for x in jobs]
+            all_pars = set(sum([list(x.keys()) for x in job_pars], []))
+
+            def var_name(x: str) -> str:
+                return f"VAR_{x}".replace("+", "p")
+
+            pars_dict = {x: f'$({var_name(x)})' for x in all_pars if x not in ignore}
+            job_pars_variable = []
+            for par in job_pars:
+                tmp = {}
+                for k, v in par.items():
+                    if k not in ignore:
+                        tmp[var_name(k)] = v
+                job_pars_variable.append(tmp)
+
+            base_pars = {
+                "executable": exe,
+                "log": jobs[0].config["log"],
+                "output": jobs[0].config["output"],
+                "error": jobs[0].config["error"],
+            }
+            base_pars.update(pars_dict)
+            base_submit = htcondor.Submit(base_pars)
+            result = self.schedd.submit(base_submit, itemdata=iter(job_pars_variable))
+
+            log.debug(f"Submitted cluster ID: {result.cluster()}")
+            for it, j in enumerate(jobs):
+                j.submit_done(result.cluster(), str(it))
+        self.sub_queue = []
+
     def _start_cli(self, sleep_time: int = 60) -> None:
         """Starts the manager, iteratively checking status of jobs.
 
@@ -428,9 +488,15 @@ class manager:
 
         c = Counter()
         event_counter = 0
+
+        self._submit_jobs()
+
         while True:
             if not self._single_check(c):
+                self._submit_jobs()
                 break
+
+            self._submit_jobs()
 
             # save with timestamp every 30 events
             # most important for first event when first
@@ -656,6 +722,7 @@ class manager:
         except Exception as e:
             log.error("Error ocurred when running manager!")
             log.error(str(e))
+            traceback.print_exc(file=sys.stdout)
             self.save()
             self.print_failed()
             sys.exit(1)

@@ -13,36 +13,44 @@ class MockSchedd:
     def __init__(self):
         self.job_queue = defaultdict(dict)
         self.job_history = defaultdict(dict)
-        self.cluster_id_counter = 1
+        self.job_id_counter = 1
         self.log_files = {}  # Simulate log files per job
 
-    def submit(self, job_description):
+    def submit(self, job_description, itemdata=[]):
         """Simulates the submission of a job."""
-        cluster_id = self.cluster_id_counter
+        if itemdata == []:
+            itemdata = [None]
+        for i, proc in enumerate(itemdata):
+            job_id = f"{self.job_id_counter}.{i}"
 
-        # Replace $(ClusterId) in the log file path
-        log_file_path = job_description.get("Log", "mock_condor_$(ClusterId).log")
-        log_file_path = log_file_path.replace("$(ClusterId)", str(cluster_id))
+            # Replace $(JobId) in the log file path
+            log_file_path = job_description.get("Log", "mock_condor_$(JobId).log")
+            log_file_path = log_file_path.replace("$(JobId)", str(job_id))
 
-        # Create an initial log file
-        self._write_log_file(log_file_path, "Job is idle.")
+            # Create an initial log file
+            self._write_log_file(log_file_path, "Job is idle.")
 
-        self.job_queue[cluster_id] = {
-            "JobDescription": job_description,
-            "JobStatus": MockHTCondor.job_status_map()["Idle"],
-        }
-        self.cluster_id_counter += 1
-        return MockSubmitResult(cluster_id)
+            self.job_queue[job_id] = {
+                "JobDescription": job_description,
+                "JobStatus": MockHTCondor.job_status_map()["Idle"],
+            }
+        self.job_id_counter += 1
+        return MockSubmitResult(self.job_id_counter - 1)
 
     def get_constraint(self, constraint):
         if constraint is None:
-            return lambda cluster_id, job_info: True
+            return lambda job_id, job_info: True
         else:
             if "==" in constraint and 'ClusterId' in constraint:
-                constraint = constraint.split("==")
-                return lambda cluster_id, job_info: cluster_id == int(
-                    constraint[1].strip()
-                )
+                constraint = constraint.split("&&")[0].split("==")
+
+                def cnstr(job_id, job_info):
+                    print(constraint[1].strip().replace(")", ""))
+                    return job_id.split(".")[0] == constraint[1].strip().replace(
+                        ")", ""
+                    )
+
+                return cnstr
 
     def query(self, constraint=None, projection=None):
         """Simulates querying the job queue."""
@@ -52,100 +60,98 @@ class MockSchedd:
         l_constraint = self.get_constraint(constraint)
 
         result = []
-        for cluster_id, job_info in self.job_queue.items():
-            if l_constraint(cluster_id, job_info):
+        for job_id, job_info in self.job_queue.items():
+            if l_constraint(job_id, job_info):
                 if projection:
                     result.append({key: job_info.get(key, None) for key in projection})
                 else:
                     result.append(job_info)
         return result
 
-    def edit(self, cluster_id, attribute, value):
+    def edit(self, job_id, attribute, value):
         """Simulates editing an attribute of a job."""
-        if cluster_id in self.job_queue:
-            self.job_queue[cluster_id][attribute] = value
+        if job_id in self.job_queue:
+            self.job_queue[job_id][attribute] = value
         else:
-            raise ValueError(f"Job ID {cluster_id} not found.")
+            raise ValueError(f"Job ID {job_id} not found.")
 
-    def remove(self, cluster_id):
+    def remove(self, job_id):
         """Simulates removing a job from the queue."""
-        if cluster_id in self.job_queue:
-            job_info = self.job_queue[cluster_id]
+        if job_id in self.job_queue:
+            job_info = self.job_queue[job_id]
             job_description = job_info["JobDescription"]
             log_file_path = job_description["Log"]
-            log_file_path = log_file_path.replace("$(ClusterId)", str(cluster_id))
+            log_file_path = log_file_path.replace("$(JobId)", str(job_id))
             self._write_log_file(log_file_path, "Job was aborted by the user.")
-            self.job_history[cluster_id] = job_info
-            del self.job_queue[cluster_id]
+            self.job_history[job_id] = job_info
+            del self.job_queue[job_id]
         else:
-            raise ValueError(f"Job ID {cluster_id} not found.")
+            raise ValueError(f"Job ID {job_id} not found.")
 
     def run_jobs(self):
         """Simulates running all idle jobs."""
-        for cluster_id, job_info in self.job_queue.items():
+        for job_id, job_info in self.job_queue.items():
             if job_info["JobStatus"] == MockHTCondor.job_status_map()["Idle"]:
                 job_info["JobStatus"] = MockHTCondor.job_status_map()["Running"]
                 log_file_path = job_info["JobDescription"]["Log"]
-                log_file_path = log_file_path.replace("$(ClusterId)", str(cluster_id))
+                log_file_path = log_file_path.replace("$(JobId)", str(job_id))
                 self._write_log_file(log_file_path, "Job is running.")
 
     def complete_jobs(self):
         """Simulates completing all running jobs."""
         to_delete = []
-        for cluster_id, job_info in self.job_queue.items():
+        for job_id, job_info in self.job_queue.items():
             if job_info["JobStatus"] == MockHTCondor.job_status_map()["Running"]:
                 job_info["JobStatus"] = MockHTCondor.job_status_map()["Completed"]
                 log_file_path = job_info["JobDescription"]["Log"]
-                log_file_path = log_file_path.replace("$(ClusterId)", str(cluster_id))
+                log_file_path = log_file_path.replace("$(JobId)", str(job_id))
                 self._write_log_file(
                     log_file_path, "Job terminated\nNormal termination (return value 0)"
                 )
-                self.job_history[cluster_id] = job_info
-                to_delete.append(cluster_id)
-        for cluster_id in to_delete:
-            del self.job_queue[cluster_id]
+                self.job_history[job_id] = job_info
+                to_delete.append(job_id)
+        for job_id in to_delete:
+            del self.job_queue[job_id]
 
-    def fail_job(self, cluster_id, fail_code):
+    def fail_job(self, job_id, fail_code):
         """Simulates failing a specific job with a custom failure code."""
-        if cluster_id in self.job_queue:
-            job_info = self.job_queue[cluster_id]
+        if job_id in self.job_queue:
+            job_info = self.job_queue[job_id]
             if job_info["JobStatus"] == MockHTCondor.job_status_map()["Running"]:
                 job_info["JobStatus"] = MockHTCondor.job_status_map()["Completed"]
                 log_file_path = job_info["JobDescription"]["Log"]
-                log_file_path = log_file_path.replace("$(ClusterId)", str(cluster_id))
+                log_file_path = log_file_path.replace("$(JobId)", str(job_id))
                 self._write_log_file(
                     log_file_path,
                     f"Job terminated\nNormal termination (return value {fail_code})",
                 )
-                self.job_history[cluster_id] = job_info
-                del self.job_queue[cluster_id]
+                self.job_history[job_id] = job_info
+                del self.job_queue[job_id]
         else:
-            raise ValueError(f"Job ID {cluster_id} not found.")
+            raise ValueError(f"Job ID {job_id} not found.")
 
     def act(self, action, constraint):
         """Simulates performing an action on jobs based on a constraint."""
         l_constraint = self.get_constraint(constraint)
-        for cluster_id, job_info in list(self.job_queue.items()):
-            if l_constraint(cluster_id, job_info):
+        for job_id, job_info in list(self.job_queue.items()):
+            if l_constraint(job_id, job_info):
                 if action == htcondor.JobAction.Release:
                     if job_info["JobStatus"] == MockHTCondor.job_status_map()["Held"]:
                         job_info["JobStatus"] = MockHTCondor.job_status_map()["Idle"]
                         log_file_path = job_info["JobDescription"]["Log"]
-                        log_file_path = log_file_path.replace(
-                            "$(ClusterId)", str(cluster_id)
-                        )
+                        log_file_path = log_file_path.replace("$(JobId)", str(job_id))
                         self._write_log_file(log_file_path, "Job is idle.")
                 elif action == htcondor.JobAction.Remove:
-                    self.remove(cluster_id)
+                    self.remove(job_id)
                 # Add more actions as needed
 
     def history(self, constraint=None, projection=None):
         """Simulates retrieving the history of completed jobs."""
         result = []
         l_constraint = self.get_constraint(constraint)
-        for cluster_id, job_info in self.job_history.items():
+        for job_id, job_info in self.job_history.items():
             if job_info["JobStatus"] == MockHTCondor.job_status_map()["Completed"]:
-                if l_constraint(cluster_id, job_info):
+                if l_constraint(job_id, job_info):
                     if projection:
                         result.append(
                             {key: job_info.get(key, None) for key in projection}
