@@ -3,18 +3,24 @@
 import logging
 from falconry import manager, job
 
-logging.basicConfig(
-    level=logging.INFO, format="%(levelname)s (%(name)s): %(message)s"
-)
+logging.basicConfig(level=logging.INFO, format="%(levelname)s (%(name)s): %(message)s")
 log = logging.getLogger(__name__)
 
 
 # using argparse to get command line arguments
 def config():
     import argparse
+
     parser = argparse.ArgumentParser(description="Falconry. Read README!")
-    parser.add_argument("--debug", action="store_true", help="Debug mode with more verbose printout")
-    parser.add_argument("--dir", type=str, help="Path to output DIR. Output by default.", default="Output")
+    parser.add_argument(
+        "--debug", action="store_true", help="Debug mode with more verbose printout"
+    )
+    parser.add_argument(
+        "--dir",
+        type=str,
+        help="Path to output DIR. Output by default.",
+        default="Output",
+    )
     return parser.parse_args()
 
 
@@ -32,7 +38,9 @@ def main():
     # It is alway useful to save the printounts to a log file
     file_handler = logging.FileHandler(cfg.dir + "/falconry.log", mode="a")
     dt_fmt = '%Y-%m-%d %H:%M:%S'
-    formatter = logging.Formatter('[{asctime}] [{levelname:<8}] {name}: {message}', dt_fmt, style='{')
+    formatter = logging.Formatter(
+        '[{asctime}] [{levelname:<8}] {name}: {message}', dt_fmt, style='{'
+    )
     file_handler.setFormatter(formatter)
     log.addHandler(file_handler)
 
@@ -59,7 +67,7 @@ def main():
         j = job(name, mgr.schedd)
 
         # set the executable and the path to the log files
-        j.set_simple(exe, cfg.dir+"/log/")
+        j.set_simple(exe, cfg.dir + "/log/")
 
         # set the expected run time in seconds
         j.set_time(120)
@@ -78,11 +86,16 @@ def main():
         depS = [j]
 
         j = simple_job("error", "util/echoE.sh")
-        # here we let manager to handle the submition
+        # Here we let manager to handle the submition
+        # They should be submitted automatically
+        # to the same cluster
         mgr.add_job(j)
         depE = [j]
+        j = simple_job("error2", "util/echoE.sh")
+        mgr.add_job(j)
+        depE.append(j)
 
-        # add job depending on the two submitted job to demonstrate what happens if depending job fails or succeds
+        # add job depending on the submitted job to demonstrate what happens if depending job fails or succeds
         j = simple_job("success_depS", "util/echoS.sh")
         j.add_job_dependency(*depS)
         mgr.add_job(j)

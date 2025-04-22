@@ -28,13 +28,6 @@ class job:
         mgr = manager.Manager(mgrDir, mgrMsg)
         schedd = mgr.schedd
 
-    Currently planning to keep single job per clusterID,
-    since group submittion would significantly complicate resubmitting.
-    HTCondor does not seem to allow for re-submittion of single ProcId,
-    so one would have to first connect specific arguments to specific ProcIds
-    and then resubmit individual jobs anyway.
-
-
     Arguments:
         name (str): name of the job for easy identification
         schedd (ScheddWrapper): HTCondor schedd wrapper
@@ -49,7 +42,9 @@ class job:
         self.name = name
 
         # since we will be resubmitting, job IDs are kept as a list
-        self.clusterIDs: List[str] = []
+        self.jobIDs: List[str] = []
+        self.jobID: str = ""
+        self.jobDir = ""
 
         # add a decoration to the job to hold dependencies
         self.dependencies: List["job"] = []
@@ -69,20 +64,24 @@ class job:
         """
         # Extend the log path
         logPathBase = os.path.abspath(logPath)
-        logDir = os.path.join(logPathBase, self.name)
+        logDir = os.path.join(logPathBase, "logs")
+        self.jobDir = os.path.join(logPathBase, self.name)
 
         # htcondor defines job as a dict
         cfg = {
             "executable": exe,
-            "output": os.path.join(logDir, "$(ClusterId).out"),
-            "error": os.path.join(logDir, "$(ClusterId).err"),
-            "log": os.path.join(logDir, "$(ClusterId).log"),
+            "log": os.path.join(logDir, "$(JobId).log"),
+            "output": os.path.join(logDir, "$(JobId).out"),
+            "error": os.path.join(logDir, "$(JobId).err"),
         }
         self.config = cfg
 
         # create the directory for the log
         if not os.path.exists(logDir):
-            os.makedirs(logDir)
+            os.makedirs(logDir, exist_ok=True)
+
+        if not os.path.exists(self.jobDir):
+            os.makedirs(self.jobDir, exist_ok=True)
 
         # setup flags:
         self.reset()
@@ -97,7 +96,7 @@ class job:
         # first rewrite dependencies using names
         depNames = [j.name for j in self.dependencies]
         jobDict = {
-            "clusterIDs": self.clusterIDs,
+            "jobIDs": self.jobIDs,
             "config": self.config,
             "depNames": depNames,
             "done": "false",
@@ -117,7 +116,7 @@ class job:
         """
 
         # TODO: define proper "jobDict checker"
-        if "clusterIDs" not in jobDict.keys() and "config" not in jobDict.keys():
+        if "jobIDs" not in jobDict.keys() and "config" not in jobDict.keys():
             log.error("Job dictionary in a wrong form")
             raise SystemError
 
@@ -132,20 +131,14 @@ class job:
             self.done = True
 
         # set cluster IDs
-        self.clusterIDs = jobDict["clusterIDs"]
+        self.jobIDs = jobDict["jobIDs"]
+
         # if not empty, the job has been already submitted at least once
-        if len(self.clusterIDs):
+        if len(self.jobIDs) > 0:
             self.htjob = htcondor.Submit(self.config)  # type: ignore
-            self.clusterID = self.clusterIDs[-1]
-            self.logFile = self.config["log"].replace(
-                "$(ClusterId)", str(self.clusterID)
-            )
-            self.outFile = self.config["output"].replace(
-                "$(ClusterId)", str(self.clusterID)
-            )
-            self.errFile = self.config["error"].replace(
-                "$(ClusterId)", str(self.clusterID)
-            )
+            self.jobID = self.jobIDs[-1]
+
+            self.expand_files()
             self.submitted = True
 
     def reset(self) -> None:
@@ -164,12 +157,13 @@ class job:
         self.dependencies.extend(list(args))
 
     # submit the job
-    def submit(self, force: bool = False) -> None:
+    def submit(self, force: bool = False, doNotSubmit: bool = False) -> None:
         """Submits the job to HTCondor if either the job is not submitted,
         the force flag is set or the job failed.
 
         Arguments:
             force (bool, optional): force submission. Defaults to False.
+            doNotSubmit (bool, optional): does not submit, just updates htjob. Defaults to False.
         """
         # TODO: raise error if problem
 
@@ -180,7 +174,7 @@ class job:
         # Should not be used by users, only internally.
 
         # first check if job was not submitted before:
-        if not force and self.clusterIDs != []:
+        if not force and self.jobIDs != []:
             status = self.get_status()
             if status in [
                 FalconryStatus.ABORTED_BY_USER,
@@ -195,41 +189,75 @@ class job:
             # the htcondor version of the configuration
             self.htjob = htcondor.Submit(self.config)  # type: ignore
 
+        if doNotSubmit:
+            return
+
         # Of course the submit has different capitalization here ...
-        self.submit_result = self.schedd.submit(self.htjob)
-        self.clusterID = self.submit_result.cluster()
+        submit_result = self.schedd.submit(self.htjob)
+        self.submit_done(submit_result.cluster(), "0")
 
-        self.clusterIDs.append(self.clusterID)
-        log.info("Submitting job %s with id %s", self.name, self.clusterID)
+    def submit_done(self, clusterID: str, procID: str) -> None:
+        """Sets the job as submitted and updates cluster ID"""
+        self.jobID = f"{clusterID}.{procID}"
+        self.jobIDs.append(self.jobID)
+        log.info(f"Submitting job {self.name} with id {self.jobID}")
         log.debug(self.config)
-        self.logFile = self.config["log"].replace("$(ClusterId)", str(self.clusterID))
-        self.outFile = self.config["output"].replace(
-            "$(ClusterId)", str(self.clusterID)
-        )
-        self.errFile = self.config["error"].replace("$(ClusterId)", str(self.clusterID))
-
+        self.expand_files()
         # reset job properties
         self.reset()
         self.submitted = True
 
+    def expand_files(self) -> None:
+        """Expands job files with cluster and job IDs"""
+
+        def update_symlink(source: str, dest: str) -> None:
+            if os.path.islink(dest):
+                os.remove(dest)
+            os.symlink(source, dest)
+
+        self.logFile = os.path.join(self.jobDir, "last.log")
+        logFile = self.config["log"].replace("$(JobId)", self.jobID)
+        update_symlink(logFile, self.logFile)
+
+        self.outFile = os.path.join(self.jobDir, "last.out")
+        outFile = self.config["output"].replace("$(JobId)", self.jobID)
+        update_symlink(outFile, self.outFile)
+
+        self.errFile = os.path.join(self.jobDir, "last.err")
+        errFile = self.config["error"].replace("$(JobId)", self.jobID)
+        update_symlink(errFile, self.errFile)
+
+    @property
+    def clusterId(self) -> str:
+        """Returns cluster ID"""
+        return self.jobID.split(".")[0]
+
+    @property
+    def procId(self) -> str:
+        """Returns proc ID"""
+        return self.jobID.split(".")[1]
+
+    @property
+    def act_constraints(self) -> str:
+        """Returns HTCondor constraints for the job"""
+        return f"(ClusterId == {self.clusterId}) && (ProcId == {self.procId})"
+
     def release(self) -> bool:
         """Releases held job"""
-        if self.clusterIDs == []:
+        if self.jobIDs == []:
             return False
         self.schedd.act(
-            htcondor.JobAction.Release, "ClusterId == " + str(self.clusterID)  # type: ignore
+            htcondor.JobAction.Release, self.act_constraints  # type: ignore
         )
-        log.info("Releasing job %s with id %s", self.name, self.clusterID)
+        log.info("Releasing job %s with id %s", self.name, self.jobID)
         return True
 
     def remove(self) -> bool:
         """Removes the job from HTCondor"""
-        if self.clusterIDs == []:
+        if self.jobIDs == []:
             return False
-        self.schedd.act(
-            htcondor.JobAction.Remove, "ClusterId == " + str(self.clusterID)  # type: ignore
-        )
-        log.info("Removing job %s with id %s", self.name, self.clusterID)
+        self.schedd.act(htcondor.JobAction.Remove, self.act_constraints)  # type: ignore
+        log.info("Removing job %s with id %s", self.name, self.jobID)
         return True
 
     def get_info(self) -> Dict[str, Any]:
@@ -239,20 +267,21 @@ class job:
             Dict[str, Any]: dictionary containing job information
         """
         # check if job has an ID
-        if self.clusterIDs == []:
+        if self.jobIDs == []:
             log.error("Trying to list info for a job which was not submitted")
             raise SystemError
 
-        constr = "ClusterId == " + str(self.clusterID)
         # get all job info of running job
-        ads = self.schedd.query(constraint=constr)
+        ads = self.schedd.query(constraint=self.act_constraints)
 
         # if the job finished, query will be empty and we have to use history
         # because condor is stupid, it returns and iterator (?),
         # so just returning first element
         # TODO: add more to projection
         if ads == []:
-            for ad in self.schedd.history(constraint=constr, projection=["JobStatus"]):
+            for ad in self.schedd.history(
+                constraint=self.act_constraints, projection=["JobStatus"]
+            ):
                 return ad
 
         # check if only one job was returned
@@ -266,7 +295,7 @@ class job:
                 log.error(
                     "HTCondor returned more than one jobs for given ID, this should not happen!"
                 )
-                log.error("Job %s with id %u", self.name, self.clusterID)
+                log.error(f"Job {self.name} with id {self.jobID}")
                 print(ads)
                 raise SystemError
 
@@ -284,9 +313,10 @@ class job:
             return FalconryStatus.SKIPPED
         elif self.done:
             return FalconryStatus.COMPLETE
-        elif self.clusterIDs == []:  # job was not even submitted
+        elif self.jobIDs == []:  # job was not even submitted
             return FalconryStatus.NOT_SUBMITTED
-        elif not os.path.isfile(self.logFile):
+        # Using exists here is crucial, it returns false for broken symlinks
+        elif not os.path.exists(self.logFile):
             return FalconryStatus.LOG_FILE_MISSING
 
         status_log = self._get_status_log()

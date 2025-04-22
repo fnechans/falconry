@@ -10,7 +10,7 @@ def test_job():
     j.set_simple("my_script.sh", "log")
     assert j.name == "test"
     assert j.schedd == schedd
-    assert j.clusterIDs == []
+    assert j.jobIDs == []
     assert j.release() is False
     assert j.remove() is False
     assert j.submitted is False
@@ -22,9 +22,9 @@ def test_job():
 
     j.submit()
     assert j.submitted is True
-    assert len(j.clusterIDs) == 1
-    assert j.clusterIDs[0] == 1
-    assert j.clusterID == 1
+    assert len(j.jobIDs) == 1
+    assert j.jobIDs[0] == "1.0"
+    assert j.jobID == "1.0"
 
     assert j.remove() is True
     assert j.get_info()["JobStatus"] == -999
@@ -32,10 +32,10 @@ def test_job():
 
     j.submit()
     assert j.submitted
-    assert len(j.clusterIDs) == 2
-    assert j.clusterIDs[0] == 1
-    assert j.clusterIDs[1] == 2
-    assert j.clusterID == 2
+    assert len(j.jobIDs) == 2
+    assert j.jobIDs[0] == "1.0"
+    assert j.jobIDs[1] == "2.0"
+    assert j.jobID == "2.0"
     assert j.get_status() == FalconryStatus.IDLE
     assert j.get_info()["JobStatus"] == j.get_status().value
 
@@ -61,6 +61,7 @@ def test_manager():
     c = Counter()
 
     assert mgr._single_check(c) is True
+    mgr._submit_jobs()
     assert j.get_status() == FalconryStatus.IDLE
     schedd.run_jobs()
     assert mgr._single_check(c) is True
