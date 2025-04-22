@@ -26,6 +26,17 @@ def schedd_check(func: Callable[["ScheddWrapper"], Any]) -> Any:
     return wrapper
 
 
+def kerberos_auth() -> None:
+    """Add kerberos creds to the schedd"""
+    try:
+        credd = htcondor.Credd()
+        credd.add_user_cred(htcondor.CredTypes.Kerberos, None)
+    except:
+        log.warning(
+            "Kerberos creds not available. This can cause problems on some clusters (like lxplus)."
+        )
+
+
 class ScheddWrapper:
     """Wrapper to allow reload of schedd"""
 

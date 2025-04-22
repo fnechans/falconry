@@ -33,11 +33,20 @@ class Counter:
         self.removed = 0
         self.held = 0
 
-    def __eq__(self, other: "object") -> bool:
+    def __eq__(self, other: object) -> bool:
         if not isinstance(other, Counter):
-            return False
-        return self.__dict__ == other.__dict__
-
+            return NotImplemented
+        return (
+            self.waiting == other.waiting and
+            self.notSub == other.notSub and
+            self.idle == other.idle and
+            self.run == other.run and
+            self.failed == other.failed and
+            self.done == other.done and
+            self.skipped == other.skipped and
+            self.removed == other.removed and
+            self.held == other.held
+        )
 
 class manager:
     """Manager holds all jobs and periodically checks their status.
@@ -726,12 +735,3 @@ class manager:
             self.save()
             self.print_failed()
             sys.exit(1)
-
-    def start_safe(self, sleepTime: int = 60, gui: bool = False) -> None:
-        """Deprecated! Use `start` instead!"""
-        log.warning(
-            "IMPORTANT! `start_safe` is now renamed as `start`. "
-            "Change your scripts as `start_safe` will be removed "
-            "in next version!"
-        )
-        self.start(sleepTime, gui)
