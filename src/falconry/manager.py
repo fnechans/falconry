@@ -48,6 +48,7 @@ class Counter:
             self.held == other.held
         )
 
+
 class manager:
     """Manager holds all jobs and periodically checks their status.
 
@@ -570,7 +571,7 @@ class manager:
 
     def _cli_interface(self, sleep_time: int = 60) -> bool:
         """CLI interface for the manager.
-\
+
         Possible commands:
             f: show failed jobs
             ff: show failed jobs and log paths
