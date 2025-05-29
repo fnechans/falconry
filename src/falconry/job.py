@@ -2,7 +2,7 @@ import htcondor
 import os
 import logging
 
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 from .status import FalconryStatus
 from .schedd_wrapper import ScheddWrapper
@@ -44,7 +44,7 @@ class job:
         # since we will be resubmitting, job IDs are kept as a list
         self.jobIDs: List[str] = []
         self.jobID: str = ""
-        self.jobDir = ""
+        self.jobDir: Optional[str] = None
 
         # add a decoration to the job to hold dependencies
         self.dependencies: List["job"] = []
@@ -97,6 +97,7 @@ class job:
         depNames = [j.name for j in self.dependencies]
         jobDict = {
             "jobIDs": self.jobIDs,
+            "jobDir": self.jobDir,
             "config": self.config,
             "depNames": depNames,
             "done": "false",
@@ -137,6 +138,7 @@ class job:
         if len(self.jobIDs) > 0:
             self.htjob = htcondor.Submit(self.config)  # type: ignore
             self.jobID = self.jobIDs[-1]
+            self.jobDir = jobDict["jobDir"]
 
             self.expand_files()
             self.submitted = True
@@ -214,6 +216,9 @@ class job:
             if os.path.islink(dest):
                 os.remove(dest)
             os.symlink(source, dest)
+
+        if self.jobDir is None:
+            raise RuntimeError('Job directory is not set for job %s' % self.name)
 
         self.logFile = os.path.join(self.jobDir, "last.log")
         logFile = self.config["log"].replace("$(JobId)", self.jobID)

@@ -31,7 +31,7 @@ def kerberos_auth() -> None:
     try:
         credd = htcondor.Credd()
         credd.add_user_cred(htcondor.CredTypes.Kerberos, None)
-    except:
+    except:  # noqa
         log.warning(
             "Kerberos creds not available. This can cause problems on some clusters (like lxplus)."
         )
