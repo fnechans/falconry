@@ -133,12 +133,12 @@ class job:
 
         # set cluster IDs
         self.jobIDs = jobDict["jobIDs"]
+        self.jobDir = jobDict["jobDir"]
 
         # if not empty, the job has been already submitted at least once
         if len(self.jobIDs) > 0:
             self.htjob = htcondor.Submit(self.config)  # type: ignore
             self.jobID = self.jobIDs[-1]
-            self.jobDir = jobDict["jobDir"]
 
             self.expand_files()
             self.submitted = True
