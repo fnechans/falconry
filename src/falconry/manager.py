@@ -246,7 +246,7 @@ class manager:
         log.info("Printing running jobs:")
         for name, j in self.jobs.items():
             if j.get_status() == FalconryStatus.RUNNING:
-                log.info("%s (id %u)", name, j.jobID)
+                log.info(f"{name} (id {j.jobID})")
                 if printLogs:
                     log.info(f"log: {j.logFile}")
                     log.info(f"out: {j.outFile}")
