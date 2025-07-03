@@ -173,15 +173,16 @@ class manager:
 
         with open(fileLatest, "w") as f:
             json.dump(output, f, indent=2)
-            if not quiet:
-                log.info("Success! Making copy with time-stamp.")
-                if not os.path.exists(fileSuf):
-                    shutil.copyfile(fileLatest, fileSuf)
-                else:
-                    raise FileExistsError(
-                        f"Destination file {fileSuf} already exists. "
-                        "This should not be possible."
-                    )
+        if not quiet:
+            log.info("Success! Making copy with time-stamp.")
+            log.debug(f"Time-stamped file: {fileSuf}")
+            if not os.path.exists(fileSuf):
+                shutil.copyfile(fileLatest, fileSuf)
+            else:
+                raise FileExistsError(
+                    f"Destination file {fileSuf} already exists. "
+                    "This should not be possible."
+                )
 
         # not necessary to remove, but maybe better to be sure its not broken
         if os.path.exists(self.saveFileName):
