@@ -9,6 +9,7 @@ import datetime
 import select
 from time import sleep
 import htcondor
+from glob import glob
 
 from typing import Dict, Any, Tuple, Optional
 
@@ -114,6 +115,22 @@ class manager:
             if state == cli.InputState.SUCCESS:
                 return True, var
             return False, var
+        elif os.path.exists(self.dir):
+            # In principle this could be done manually but this state is
+            # so specific (usually running out of space) that it requires
+            # additional user intervention anyway
+            log.error(f"Manager directory {self.dir} already exists but savefile "
+                      f"{self.saveFileName} does not exist! This suggests that "
+                      "either the savefile was manually deleted or the manager was "
+                      "not shut down properly. If you want to continue from the last "
+                      f"known state, create a softlink {self.saveFileName} to latest "
+                      f"savefile in the {self.dir}, either {self.saveFileName}.latest "
+                      f"or {self.saveFileName}.YYYYMMDD_HHMM_SS, if the .latest is "
+                      "corrupted. If you want to start from scratch, delete the "
+                      f"manager directory {self.dir} and start a new manager.")
+            raise FileExistsError
+
+
         return True, "n"  # automatically assume new
 
     def ask_for_message(self) -> None:
