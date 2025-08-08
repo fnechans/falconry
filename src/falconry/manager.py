@@ -124,10 +124,10 @@ class manager:
                       "either the savefile was manually deleted or the manager was "
                       "not shut down properly. If you want to continue from the last "
                       f"known state, create a softlink {self.saveFileName} to latest "
-                      f"savefile in the {self.dir} (either {self.saveFileName}.latest "
-                      f"or {self.saveFileName}.YYYYMMDD_HHMM_SS). If you want to "
-                      f"start from scratch, delete the manager directory {self.dir} "
-                      "and start a new manager.")
+                      f"savefile in the {self.dir}, either {self.saveFileName}.latest "
+                      f"or {self.saveFileName}.YYYYMMDD_HHMM_SS, if the .latest is "
+                      "corrupted. If you want to start from scratch, delete the "
+                      f"manager directory {self.dir} and start a new manager.")
             raise FileExistsError
 
 
