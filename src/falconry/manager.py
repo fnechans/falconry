@@ -9,7 +9,7 @@ import datetime
 import select
 from time import sleep
 import htcondor
-from glob import glob
+import copy
 
 from typing import Dict, Any, Tuple, Optional
 
@@ -24,6 +24,9 @@ log = logging.getLogger('falconry')
 class Counter:
     # just holds few variables used in status print
     def __init__(self) -> None:
+        self.reset()
+
+    def reset(self) -> None:
         self.waiting = 0
         self.notSub = 0
         self.idle = 0
@@ -548,8 +551,8 @@ class manager:
             f"|-Checking status of jobs [{datetime.datetime.now()}]----------------|",
         )
 
-        cOld = c
-        c = Counter()
+        cOld = copy.copy(c)
+        c.reset()
         self._count_jobs(c)
 
         # if no job is waiting nor running, finish the manager
