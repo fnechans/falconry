@@ -10,6 +10,7 @@ import select
 from time import sleep
 import htcondor
 import copy
+from glob import glob
 
 from typing import Dict, Any, Tuple, Optional
 
@@ -118,7 +119,7 @@ class manager:
             if state == cli.InputState.SUCCESS:
                 return True, var
             return False, var
-        elif os.path.exists(self.dir):
+        elif os.path.exists(self.dir) and len(glob(f"{self.dir}/{self.saveFileName}.*")) > 0:
             # In principle this could be done manually but this state is
             # so specific (usually running out of space) that it requires
             # additional user intervention anyway
@@ -132,7 +133,6 @@ class manager:
                       "corrupted. If you want to start from scratch, delete the "
                       f"manager directory {self.dir} and start a new manager.")
             raise FileExistsError
-
 
         return True, "n"  # automatically assume new
 
