@@ -9,7 +9,7 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s (%(name)s): %(mess
 log = logging.getLogger('falconry')
 
 
-def config() -> argparse.Namespace:
+def config() -> argparse.ArgumentParser:
     """Get configuration from cli arguments"""
 
     parser = argparse.ArgumentParser(
@@ -62,7 +62,7 @@ def config() -> argparse.Namespace:
         default=1,
         help='Number of cpus to request. Default is 1',
     )
-    return parser.parse_args()
+    return parser
 
 
 def get_name(command: str) -> str:
@@ -232,7 +232,7 @@ def main() -> None:
         )
 
     log.info('Setting up `falconry` to run your commands')
-    cfg = config()
+    cfg = config().parse_args()
     tpcondor_dir = os.path.join(cfg.dir, cfg.subdir)
     mgr = manager(tpcondor_dir)  # the argument specifies where the job is saved
 

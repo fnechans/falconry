@@ -91,3 +91,11 @@ Example program
 ---------------
 
 An example of a complete implemenation can be found in `example.py <https://github.com/fnechans/falconry/blob/master/example.py>`_, which puts all these features together. It also uses command line parser to make the usage more convenient. E.g. it automatically loads previous instance if ``--cont`` command line argument is used.
+
+----------
+Executable
+----------
+
+Allows to easily submit a job from a command line.
+
+See :ref:`executable`

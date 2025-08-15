@@ -37,6 +37,7 @@ extensions = [
     "sphinx.ext.autodoc",
     "sphinx.ext.napoleon",
     "sphinx_rtd_theme",
+    "sphingxarg.ext",
 ]
 
 html_theme = "sphinx_rtd_theme"
@@ -55,7 +56,7 @@ master_doc = 'index'
 
 # General information about the project.
 project = 'falconry'
-copyright = '2020-2024, Filip Nechansky'
+copyright = '2020-2025, Filip Nechansky'
 author = 'Filip Nechansky'
 
 # The version info for the project you're documenting, acts as replacement for
