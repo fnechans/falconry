@@ -37,8 +37,6 @@ echo "$CMD"
 echo
 
 # Using eval here is necessary when using nested commands,
-# in our case e.g. when using one command to get name of rundir.
-# `tp finalise $(tp --print-rundir preselect ...)`
 eval "$CMD"
 
 retval=$?
