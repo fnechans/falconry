@@ -2,6 +2,26 @@
 Quickstart
 ==========
 
+----------
+Executable
+----------
+
+Allows to easily submit a job (or multiple jobs) from a command line.
+
+    falconry "COMMAND"
+
+or
+
+    falconry "COMMAND1; COMMAND2".
+
+This submission automatically uses current environment variables so
+in principle any command running locally should work.
+
+For more details on executable usage see :ref:`executable`.
+
+For more complex usage, see :ref:`job` and :ref:`manager`
+on how to setup your own python script to manage your jobs.
+
 ---
 Job
 ---
@@ -91,11 +111,3 @@ Example program
 ---------------
 
 An example of a complete implemenation can be found in `example.py <https://github.com/fnechans/falconry/blob/master/example.py>`_, which puts all these features together. It also uses command line parser to make the usage more convenient. E.g. it automatically loads previous instance if ``--cont`` command line argument is used.
-
-----------
-Executable
-----------
-
-Allows to easily submit a job from a command line.
-
-See :ref:`executable`
