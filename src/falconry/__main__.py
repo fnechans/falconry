@@ -16,7 +16,8 @@ def config() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Falconry executable,"
         "which allows to run set of commands on HTCondor within the current "
-        "environment."
+        "environment (using the htcondor `getenv` option, see:"
+        "https://htcondor.readthedocs.io/en/latest/users-manual/env-of-job.html#environment-variables)."
     )
     parser.add_argument('--dry', action='store_true', help='Dry run')
     parser.add_argument(
