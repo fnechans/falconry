@@ -5,5 +5,5 @@ Executable
 
 .. argparse::
     :module: falconry
-    :func: __main__.config
+    :func: config
     :prog: falconry
