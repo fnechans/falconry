@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 import logging
-from falconry import manager, job
+from .manager import manager
+from .job import job
 import os
 import htcondor
 import argparse
@@ -21,7 +22,7 @@ def config() -> argparse.ArgumentParser:
     parser.add_argument(
         '--dir',
         type=str,
-        default='tpcondor_output',
+        default='condor_output',
         help='Output directory for falconry, `condor_output` by default.',
     )
     parser.add_argument(
