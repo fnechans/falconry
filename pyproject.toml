@@ -35,11 +35,11 @@ Issues = "https://github.com/fnechans/falconry/issues"
 # pyproject.toml, .gitignore, any README, any LICENSE, AUTHORS
 only-include = [
     "/src",
-    "/tests",
-    "/util",
-    "/example.py",
 ]
 
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/falconry"]
+
+[project.scripts]
+falconry = "falconry.__main__:main"

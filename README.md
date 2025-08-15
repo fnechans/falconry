@@ -11,26 +11,24 @@ so even if you disconnect or htcondor crashes, you can continue where you left o
 
 Detailed documentation can be found on [ReadTheDocs](https://falconry.readthedocs.io/en/latest/index.html). You can also check `example.py` for an example of usage. Package has to be first installed using pip as described in section on [installation](#installation-using-pip).
 
+For simple submition, you can also use `falconry` as an executable.
+
 ## Instalation using pip
 
 Falconry can be installed using pip:
 
     $ pip3 install falconry
 
-## Installation from source
+## Running falconry as an executable
 
-To install falconry, simply call following in the repository directory:
+You can do something as simple as:
 
-    $ pip3 install --user -e .
+    $ falconry "MY COMMAND"
 
-Then you can include the package in your project simply by adding:
+This will create a job that runs `MY COMMAND` and will be submitted to HTCondor.
+You might want to separate different submission by subdirectory, for that use
+the -s option:
 
-    import falconry
+    $ falconry "MY COMMAND" -s SUBDIRECTORY
 
-### Installing python3 API for HTCondor
-
-The package  requires htcondor API to run. One can simply do:
-
-    $ python3 -m pip  install --user -r requirements.txt
-
-though it might be better to install in virtual environment.
+For more options, see the documentation or `falconry --help`.
