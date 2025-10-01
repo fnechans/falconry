@@ -224,9 +224,9 @@ class manager:
         files.sort()
         # Here -1 because of the `latest`
         files = files[: -self.keepSaveFiles - 1]
-        for f in files:
-            log.debug(f"Removing old save file {f}")
-            os.remove(f)
+        for fl in files:
+            log.debug(f"Removing old save file {fl}")
+            os.remove(fl)
 
     def load(self, retryFailed: bool = False) -> None:
         """Loads the saved status of the jobs from a json file
