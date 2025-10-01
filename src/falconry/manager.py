@@ -65,6 +65,8 @@ class manager:
         mgrDir (str): directory where the manager stores the jobs
         mgrMsg (str): message to be saved in the save file
         maxJobIdle (int): maximum number of idle jobs
+        schedd (ScheddWrapper): htcondor schedd wrapper
+        keepSaveFiles (int): number of save files to keep, defaults to 2
     """
 
     reservedNames = ["Message", "Command"]
@@ -75,6 +77,7 @@ class manager:
         mgrMsg: str = "",
         maxJobIdle: int = -1,
         schedd: Optional[ScheddWrapper] = None,
+        keepSaveFiles: int = 2,
     ):
         log.info("MONITOR: INIT")
 
@@ -98,6 +101,7 @@ class manager:
 
         self.maxJobIdle = maxJobIdle
         self.curJobIdle = 0
+        self.keepSaveFiles = keepSaveFiles
 
     # check if save file already exists
     def check_savefile_status(self) -> Tuple[bool, Optional[str]]:
@@ -208,6 +212,18 @@ class manager:
         if os.path.exists(self.saveFileName):
             os.remove(self.saveFileName)
         os.symlink(fileLatest.split("/")[-1], self.saveFileName)
+
+        # clean up old save files
+        files = glob(f"{self.saveFileName}.*")
+        # sort based on time-stamp
+        files.sort()
+        # Here -1 because of the `latest`
+        files = files[:-self.keepSaveFiles-1]
+        for f in files:
+            log.debug(f"Removing old save file {f}")
+            os.remove(f)
+
+
 
     def load(self, retryFailed: bool = False) -> None:
         """Loads the saved status of the jobs from a json file
