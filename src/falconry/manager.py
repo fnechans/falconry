@@ -42,15 +42,15 @@ class Counter:
         if not isinstance(other, Counter):
             return NotImplemented
         return (
-            self.waiting == other.waiting and
-            self.notSub == other.notSub and
-            self.idle == other.idle and
-            self.run == other.run and
-            self.failed == other.failed and
-            self.done == other.done and
-            self.skipped == other.skipped and
-            self.removed == other.removed and
-            self.held == other.held
+            self.waiting == other.waiting
+            and self.notSub == other.notSub
+            and self.idle == other.idle
+            and self.run == other.run
+            and self.failed == other.failed
+            and self.done == other.done
+            and self.skipped == other.skipped
+            and self.removed == other.removed
+            and self.held == other.held
         )
 
 
@@ -123,19 +123,24 @@ class manager:
             if state == cli.InputState.SUCCESS:
                 return True, var
             return False, var
-        elif os.path.exists(self.dir) and len(glob(f"{self.dir}/{self.saveFileName}.*")) > 0:
+        elif (
+            os.path.exists(self.dir)
+            and len(glob(f"{self.dir}/{self.saveFileName}.*")) > 0
+        ):
             # In principle this could be done manually but this state is
             # so specific (usually running out of space) that it requires
             # additional user intervention anyway
-            log.error(f"Manager directory {self.dir} already exists but savefile "
-                      f"{self.saveFileName} does not exist! This suggests that "
-                      "either the savefile was manually deleted or the manager was "
-                      "not shut down properly. If you want to continue from the last "
-                      f"known state, create a softlink {self.saveFileName} to latest "
-                      f"savefile in the {self.dir}, either {self.saveFileName}.latest "
-                      f"or {self.saveFileName}.YYYYMMDD_HHMM_SS, if the .latest is "
-                      "corrupted. If you want to start from scratch, delete the "
-                      f"manager directory {self.dir} and start a new manager.")
+            log.error(
+                f"Manager directory {self.dir} already exists but savefile "
+                f"{self.saveFileName} does not exist! This suggests that "
+                "either the savefile was manually deleted or the manager was "
+                "not shut down properly. If you want to continue from the last "
+                f"known state, create a softlink {self.saveFileName} to latest "
+                f"savefile in the {self.dir}, either {self.saveFileName}.latest "
+                f"or {self.saveFileName}.YYYYMMDD_HHMM_SS, if the .latest is "
+                "corrupted. If you want to start from scratch, delete the "
+                f"manager directory {self.dir} and start a new manager."
+            )
             raise FileExistsError
 
         return True, "n"  # automatically assume new
@@ -218,12 +223,10 @@ class manager:
         # sort based on time-stamp
         files.sort()
         # Here -1 because of the `latest`
-        files = files[:-self.keepSaveFiles-1]
+        files = files[: -self.keepSaveFiles - 1]
         for f in files:
             log.debug(f"Removing old save file {f}")
             os.remove(f)
-
-
 
     def load(self, retryFailed: bool = False) -> None:
         """Loads the saved status of the jobs from a json file
