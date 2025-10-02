@@ -1,2 +1,2 @@
-htcondor<25
-ijson
+htcondor>=24.2.1,<25
+ijson>=3.3.0

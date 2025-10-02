@@ -420,7 +420,7 @@ class manager:
         def _fit_to_width(text: str, width: int) -> str:
             if len(text) <= width:
                 return text
-            return text[: width - 1] + "…"
+            return text[: width - 1] + "…\r"
 
         termWidth = shutil.get_terminal_size(fallback=(80, 24)).columns
         clearLine = " " * termWidth + "\r"
