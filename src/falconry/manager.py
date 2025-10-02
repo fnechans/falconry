@@ -417,16 +417,18 @@ class manager:
             c (counter): counter object to count the jobs
         """
 
-        maxLength = 0
+        def _fit_to_width(text: str, width: int) -> str:
+            if len(text) <= width:
+                return text
+            return text[: width - 1] + "…"
+
+        termWidth = shutil.get_terminal_size(fallback=(80, 24)).columns
+        clearLine = " " * termWidth + "\r"
         for name, j in self.jobs.items():
-            printStr = f"Checking {name}\t\t\t\t\t\t\r"
-            if len(printStr) > maxLength:
-                maxLength = len(printStr)
-            print(printStr, end='')
-
+            printStr = _fit_to_width(f"Checking {name}\r", termWidth)
+            print(printStr, end='', flush=True)
             self._count_job(counter, j)
-
-            print(" " * maxLength + "\r", flush=True, end='')
+            print(clearLine, flush=True, end='')
 
     def _count_job(self, c: Counter, j: job) -> None:
         """Updates the counter object with the status of a single job.
