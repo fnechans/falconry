@@ -21,7 +21,7 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
 ]
 dependencies = [
-    "htcondor>=24.2.1",
+    "htcondor>=24.2.1,<25",
     "ijson>=3.3.0",
 ]
 
