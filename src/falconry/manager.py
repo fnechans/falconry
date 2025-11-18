@@ -12,7 +12,25 @@ import htcondor2 as htcondor
 import copy
 from glob import glob
 import subprocess
-import contextlib
+from typing import Any
+try:
+    from contextlib import chdir
+except ImportError:
+    # Simple copy from python source for python <= 3.11
+    from contextlib import AbstractContextManager
+    class chdir(AbstractContextManager):  # type: ignore
+        """Non thread-safe context manager to change the current working directory."""
+
+        def __init__(self, path: str) -> None:
+            self.path = path
+            self._old_cwd: list[str] = []
+
+        def __enter__(self) -> None:
+            self._old_cwd.append(os.getcwd())
+            os.chdir(self.path)
+
+        def __exit__(self, *excinfo: Any) -> None:
+            os.chdir(self._old_cwd.pop())
 
 from typing import Dict, Any, Tuple, Optional
 
@@ -134,7 +152,7 @@ class manager:
         # in case of e.g. relative paths
         command = f'tmux -v new-session -c {os.getcwd()} -d -s falconry_remote{self.dir} falconry --remote --dir {self.dir} BLANK'
         # Run in dir so log files are in the right place
-        with contextlib.chdir(self.dir):
+        with chdir(self.dir):
             if not run_command_local(command):
                 raise Exception('Failed to start remote manager')
 
