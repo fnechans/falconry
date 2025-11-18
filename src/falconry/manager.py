@@ -14,7 +14,7 @@ from glob import glob
 import subprocess
 from typing import Any
 try:
-    from contextlib import chdir
+    from contextlib import chdir  # type: ignore
 except ImportError:
     # Simple copy from python source for python <= 3.11
     from contextlib import AbstractContextManager
