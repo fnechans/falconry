@@ -8,9 +8,11 @@ import traceback
 import datetime
 import select
 from time import sleep
-import htcondor
+import htcondor2 as htcondor
 import copy
 from glob import glob
+import subprocess
+import contextlib
 
 from typing import Dict, Any, Tuple, Optional
 
@@ -20,6 +22,13 @@ from . import cli
 from .schedd_wrapper import ScheddWrapper
 
 log = logging.getLogger('falconry')
+
+
+def run_command_local(command: str) -> bool:
+    """Runs a command locally, returns True on success, False on failure"""
+    log.debug(f'Running command: {command}')
+    result = subprocess.run(command.split(), stdout=subprocess.PIPE)
+    return result.returncode == 0
 
 
 class Counter:
@@ -54,6 +63,12 @@ class Counter:
         )
 
 
+class Mode:
+    NORMAL = 0
+    LOCAL = 1
+    REMOTE = 2
+
+
 class manager:
     """Manager holds all jobs and periodically checks their status.
 
@@ -69,7 +84,7 @@ class manager:
         keepSaveFiles (int): number of save files to keep, defaults to 2
     """
 
-    reservedNames = ["Message", "Command"]
+    reservedNames = ["Message", "Command", "remote"]
 
     def __init__(
         self,
@@ -78,6 +93,7 @@ class manager:
         maxJobIdle: int = -1,
         schedd: Optional[ScheddWrapper] = None,
         keepSaveFiles: int = 2,
+        mode: int = Mode.NORMAL,
     ):
         log.info("MONITOR: INIT")
 
@@ -96,12 +112,31 @@ class manager:
             os.makedirs(mgrDir)
         self.dir = mgrDir
         self.saveFileName = self.dir + "/data.json"
+        if mode == Mode.REMOTE:
+            self.saveFileName = self.dir + "/remote.data.json"
         self.mgrMsg = mgrMsg
         self.command = " ".join(sys.argv)
 
         self.maxJobIdle = maxJobIdle
         self.curJobIdle = 0
         self.keepSaveFiles = keepSaveFiles
+        self.mode = mode
+
+    def submit_remote_job(self):
+        """Creates tmux session for remote manager."""
+        if self.mode != Mode.LOCAL:
+            raise Exception("Manager is not in LOCAL mode")
+        self.save(prefix='remote.')
+        log.info('Starting remote manager')
+        # To get log files in the right place, we
+        # run tmux from within the `self.dir`
+        # but then run falconry from the current directory
+        # in case of e.g. relative paths
+        command = f'tmux -v new-session -c {os.getcwd()} -d -s falconry_remote{self.dir} falconry --remote --dir {self.dir} BLANK'
+        # Run in dir so log files are in the right place
+        with contextlib.chdir(self.dir):
+            if not run_command_local(command):
+                raise Exception('Failed to start remote manager')
 
     # check if save file already exists
     def check_savefile_status(self) -> Tuple[bool, Optional[str]]:
@@ -114,13 +149,29 @@ class manager:
         """
         if os.path.exists(self.saveFileName):
             log.warning(f"Manager directory {self.dir} already exists!")
+
             state, var = cli.input_checker(
-                {"l": "Load existing jobs", "n": "Start new jobs"}
+                {
+                    "l": "Load existing jobs",
+                    "n": f"Start new jobs (will delete {self.dir}!!!)",
+                }
             )
 
             # Simplify the output for user interface
             # both unknown/timeout have the same result
             if state == cli.InputState.SUCCESS:
+                if var == "n":
+                    if self.mode == Mode.LOCAL and run_command_local(
+                        "tmux has-session -t falconry_remote" + self.dir
+                    ):
+                        log.info("Killing remote manager")
+                        run_command_local(
+                            "tmux kill-session -t falconry_remote" + self.dir
+                        )
+                    log.info("Deleting old manager directory")
+                    shutil.rmtree(self.dir)
+                    os.makedirs(self.dir)
+
                 return True, var
             return False, var
         elif (
@@ -177,7 +228,7 @@ class manager:
 
         self.jobs[j.name] = j
 
-    def save(self, quiet: bool = False) -> None:
+    def save(self, quiet: bool = False, prefix: str = "") -> None:
         """Saves the current status of the jobs to a json file.
 
         If `quiet` is `True`, it will not print any messages and
@@ -195,10 +246,17 @@ class manager:
         for name, j in self.jobs.items():
             output[name] = j.save()
 
+        if prefix != "":
+            tmp_list = self.saveFileName.split("/")
+            tmp_list[-1] = f"{prefix}{tmp_list[-1]}"
+            saveFileName = '/'.join(tmp_list)
+        else:
+            saveFileName = self.saveFileName
+
         # save with a timestamp as a suffix, create sym link
         current_time = datetime.datetime.now().strftime("%Y%m%d_%H%M_%S")
-        fileLatest = f"{self.saveFileName}.latest"
-        fileSuf = f"{self.saveFileName}.{current_time}"  # only if not quiet
+        fileLatest = f"{saveFileName}.latest"
+        fileSuf = f"{saveFileName}.{current_time}"  # only if not quiet
 
         with open(fileLatest, "w") as f:
             json.dump(output, f, indent=2)
@@ -214,12 +272,12 @@ class manager:
                 )
 
         # not necessary to remove, but maybe better to be sure its not broken
-        if os.path.exists(self.saveFileName):
-            os.remove(self.saveFileName)
-        os.symlink(fileLatest.split("/")[-1], self.saveFileName)
+        if os.path.exists(saveFileName):
+            os.remove(saveFileName)
+        os.symlink(fileLatest.split("/")[-1], saveFileName)
 
         # clean up old save files
-        files = glob(f"{self.saveFileName}.*")
+        files = glob(f"{saveFileName}.*")
         # sort based on time-stamp
         files.sort()
         # Here -1 because of the `latest`
@@ -237,7 +295,7 @@ class manager:
             Defaults to False.
         """
         log.info("Loading past status of jobs")
-        with open(self.dir + "/data.json", "rb") as f:
+        with open(self.saveFileName, "rb") as f:
             depNames = {}
             for name, jobDict in ijson.kvitems(f, ""):
                 if name in manager.reservedNames:
@@ -319,9 +377,9 @@ class manager:
                     log.info(f"err: {j.errFile}")
 
     def _check_dependence(self) -> None:
-        """Checks if all dependencies of a job are done. If so, it will submit
-        the job. If any of the dependencies failed, it will add the job to the
-        skipped list.
+        """Checks status of all jobs and their dependencies to determine
+        if job is skipped. This is purely for printing purposes,
+        in the backend, jobs are
         """
 
         # TODO: consider if not submitted jobs in a special list
@@ -425,10 +483,13 @@ class manager:
         termWidth = shutil.get_terminal_size(fallback=(80, 24)).columns
         clearLine = " " * termWidth + "\r"
         for name, j in self.jobs.items():
-            printStr = _fit_to_width(f"Checking {name}\r", termWidth)
-            print(printStr, end='', flush=True)
+            if self.mode != Mode.REMOTE:
+                printStr = _fit_to_width(f"Checking {name}\r", termWidth)
+            if self.mode != Mode.REMOTE:
+                print(printStr, end='', flush=True)
             self._count_job(counter, j)
-            print(clearLine, flush=True, end='')
+            if self.mode != Mode.REMOTE:
+                print(clearLine, flush=True, end='')
 
     def _count_job(self, c: Counter, j: job) -> None:
         """Updates the counter object with the status of a single job.
@@ -438,6 +499,7 @@ class manager:
             c (counter): counter object to update
             j (job): job to check
         """
+        j.find_id()
 
         # first check if job is not submitted, skipped or done
         if j.skipped:
@@ -451,7 +513,8 @@ class manager:
             return
 
         #  resubmit job which failed due to condor problems
-        self._check_resubmit(j)
+        if self.mode != Mode.LOCAL:
+            self._check_resubmit(j)
 
         # count job with different status
         status = j.get_status()
@@ -491,7 +554,7 @@ class manager:
                 raise Exception
             jobs_with_exe[exe].append(j)
 
-        ignore = ["executable", "log", "output", "error"]
+        ignore = ["executable", "log"]
         # Now we need to submit each group
         for exe, jobs in jobs_with_exe.items():
             #
@@ -515,8 +578,6 @@ class manager:
             base_pars = {
                 "executable": exe,
                 "log": jobs[0].config["log"],
-                "output": jobs[0].config["output"],
-                "error": jobs[0].config["error"],
             }
             base_pars.update(pars_dict)
             base_submit = htcondor.Submit(base_pars)
@@ -524,7 +585,7 @@ class manager:
 
             log.debug(f"Submitted cluster ID: {result.cluster()}")
             for it, j in enumerate(jobs):
-                j.submit_done(result.cluster(), str(it))
+                j.submit_done(f"{result.cluster()}.{it}")
         self.sub_queue = []
 
     def _start_cli(self, sleep_time: int = 60) -> None:
@@ -541,14 +602,21 @@ class manager:
         c = Counter()
         event_counter = 0
 
-        self._submit_jobs()
+        if self.mode != Mode.LOCAL:
+            self._submit_jobs()
+        if self.mode == Mode.LOCAL:
+            if run_command_local("tmux has-session -t falconry_remote" + self.dir):
+                log.info("Remote manager is already running")
+            else:
+                self.submit_remote_job()
+                sleep(5)  # give remote chance to start
 
         while True:
             if not self._single_check(c):
-                self._submit_jobs()
                 break
 
-            self._submit_jobs()
+            if self.mode != Mode.LOCAL:
+                self._submit_jobs()
 
             # save with timestamp every 30 events
             # most important for first event when first
@@ -557,10 +625,31 @@ class manager:
                 self.save()
             event_counter += 1
 
-            if not self._cli_interface(sleep_time):
+            if self.mode:
+                sleep(sleep_time)
+            elif not self._cli_interface(sleep_time):
                 break
 
         log.info("MONITOR: FINISHED")
+
+    def _print_summary(self, c: Counter) -> None:
+        """Prints a summary of the current state
+        of the Counter object.
+
+        Arguments:
+            c (Counter): Counter object
+        """
+        sleep(0.2)  # the printing sometimes breaks here, adding delay helps...
+        log.info(
+            "| nsub: {0:>4} | hold: {1:>5} | fail: {2:>6} | rem: {3:>6} | skip: {4:>5} |".format(
+                c.notSub, c.held, c.failed, c.removed, c.skipped
+            )
+        )
+        log.info(
+            "| wait: {0:>6} | idle: {1:>4} | RUN: {2:>5} | DONE: {3:>6} | TOT: {4:>6} |".format(
+                c.waiting, c.idle, c.run, c.done, len(self.jobs)
+            )
+        )
 
     def _single_check(self, c: Counter) -> bool:
         """Single check in the manager loop.
@@ -577,22 +666,21 @@ class manager:
         self._count_jobs(c)
 
         # if no job is waiting nor running, finish the manager
-        if not (c.waiting + c.notSub + c.idle + c.run > 0):
+        if not (c.waiting + c.notSub + c.idle + c.run + c.held > 0):
+            self._print_summary(c)
+            return False
+
+        # If we expect remote, check if its still running now
+        if self.mode == Mode.LOCAL and not run_command_local(
+            "tmux has-session -t falconry_remote" + self.dir
+        ):
+            self._print_summary(c)
+            log.error("Remote manager is not running anymore!")
             return False
 
         # only printout if something changed:
         if c != cOld:
-            sleep(0.2)  # the printing sometimes breaks here, adding delay helps...
-            log.info(
-                "| nsub: {0:>4} | hold: {1:>5} | fail: {2:>6} | rem: {3:>6} | skip: {4:>5} |".format(
-                    c.notSub, c.held, c.failed, c.removed, c.skipped
-                )
-            )
-            log.info(
-                "| wait: {0:>6} | idle: {1:>4} | RUN: {2:>5} | DONE: {3:>6} | TOT: {4:>6} |".format(
-                    c.waiting, c.idle, c.run, c.done, len(self.jobs)
-                )
-            )
+            self._print_summary(c)
 
             # Update current idle of jobs managed by manager.
             # All new jobs submitted jobs in `check_dependence`
@@ -675,6 +763,7 @@ class manager:
                 return False
             elif var == "retry all":
                 for j in self.jobs.values():
+                    j.find_id()  # in case job was resubmited on remote
                     self._check_resubmit(j, True)
 
         return True
@@ -723,7 +812,7 @@ class manager:
 
         def tk_count() -> None:
             c = Counter()
-            self._count_jobs(c)
+            self._single_check(c)
             labels["ns"]["text"] = f"{c.notSub}"
             labels["i"]["text"] = f"{c.idle}"
             labels["r"]["text"] = f"{c.run}"
@@ -737,9 +826,6 @@ class manager:
             # TODO: add condition (close on finish)
             # if not (c.waiting + c.notSub + c.idle + c.run > 0):
             #    window.destroy()
-
-            # checking dependencies and submitting ready jobs
-            self._check_dependence()
 
             window.after(1000 * sleepTime, tk_count)
 

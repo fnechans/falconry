@@ -1,6 +1,7 @@
-import htcondor
+import htcondor2 as htcondor
 import os
 import logging
+import glob
 
 from typing import List, Dict, Any, Optional
 
@@ -71,8 +72,8 @@ class job:
         cfg = {
             "executable": exe,
             "log": os.path.join(logDir, "$(JobId).log"),
-            "output": os.path.join(logDir, "$(JobId).out"),
-            "error": os.path.join(logDir, "$(JobId).err"),
+            "output": os.path.join(self.jobDir, "$(JobId).out"),
+            "error": os.path.join(self.jobDir, "$(JobId).err"),
         }
         self.config = cfg
 
@@ -196,13 +197,27 @@ class job:
 
         # Of course the submit has different capitalization here ...
         submit_result = self.schedd.submit(self.htjob)
-        self.submit_done(submit_result.cluster(), "0")
+        self.submit_done(f"{submit_result.cluster()}.0")
 
-    def submit_done(self, clusterID: str, procID: str) -> None:
+    def find_id(self) -> None:
+        """Finds the job ID based on the log file names."""
+        # Find all log files
+        if self.jobDir is None:
+            raise RuntimeError(f'Job directory is not set for job {self.name}')
+        logFiles = glob.glob(os.path.join(self.jobDir, "*.log"))
+        logFiles.sort(reverse=True)
+        if len(logFiles) == 0:
+            return
+        jobid = os.path.basename(logFiles[0]).strip(".log")
+        self.submit_done(jobid)
+
+    def submit_done(self, jobID: str) -> None:
         """Sets the job as submitted and updates cluster ID"""
-        self.jobID = f"{clusterID}.{procID}"
+        if jobID in self.jobIDs:
+            return
+        self.jobID = jobID
         self.jobIDs.append(self.jobID)
-        log.info(f"Submitting job {self.name} with id {self.jobID}")
+        log.info(f"Job {self.name}: found id {self.jobID}")
         log.debug(self.config)
         self.expand_files()
         # reset job properties
@@ -220,17 +235,13 @@ class job:
         if self.jobDir is None:
             raise RuntimeError('Job directory is not set for job %s' % self.name)
 
-        self.logFile = os.path.join(self.jobDir, "last.log")
+        self.logFile = os.path.join(self.jobDir, f"{self.jobID}.log")
         logFile = self.config["log"].replace("$(JobId)", self.jobID)
         update_symlink(logFile, self.logFile)
 
-        self.outFile = os.path.join(self.jobDir, "last.out")
-        outFile = self.config["output"].replace("$(JobId)", self.jobID)
-        update_symlink(outFile, self.outFile)
+        self.outFile = self.config["output"].replace("$(JobId)", self.jobID)
 
-        self.errFile = os.path.join(self.jobDir, "last.err")
-        errFile = self.config["error"].replace("$(JobId)", self.jobID)
-        update_symlink(errFile, self.errFile)
+        self.errFile = self.config["error"].replace("$(JobId)", self.jobID)
 
     @property
     def clusterId(self) -> str:
@@ -312,6 +323,7 @@ class job:
         Returns:
             int: status of the job
         """
+        self.find_id()
 
         # First check if the job is skipped or not even submitted
         if self.skipped:
@@ -422,3 +434,59 @@ class job:
             args (str): arguments for the job
         """
         self.config["arguments"] = args
+
+
+def quick_job(name: str, command: str, schedd: ScheddWrapper, logDir: str, time: int, ncpu: int = 1) -> job:
+    """Create job for given command.
+
+    Arguments:
+        name (str): name of the job
+        command (str): command to run
+        mgr (manager): HTCondor manager
+        time (int): expected runtime
+    Returns:
+        job: created job
+    """
+    # define job and pass the HTCondor schedd to it
+    j = job(name, schedd)
+
+    # set the executable and the path to the log files
+    main_path = os.path.dirname(os.path.abspath(__file__))
+    executable = os.path.join(main_path, 'run_simple.sh')
+    if not os.path.isfile(executable):
+        log.error(f'Failed to find executable {executable}')
+        raise FileNotFoundError
+    j.set_simple(
+        executable,
+        logDir,
+    )
+
+    is_desy = "desy.de" in str(schedd.schedd._addr)
+
+    # expected runtime
+    j.set_time(time, useRequestRuntime=is_desy)
+
+    # set the command
+    j.set_arguments(f'{name} {command}')
+
+    # and environenment
+    basedir = os.path.abspath('.')
+    env = f'basedir={basedir};'
+
+    condor_options = {'environment': env, 'getenv': 'True'}
+    # Some cluster specific settings which might break submission on other clusters
+    if "cern.ch" in str(schedd.schedd._addr):
+        condor_options["MY.SendCredential"] = "True"
+    elif is_desy:
+        condor_options["MY.SendCredential"] = "True"
+        condor_options["Requirements"] = '(OpSysAndVer == "RedHat9")'
+    if 'particle.cz' in str(schedd.schedd._addr):
+        home = os.getenv("HOME")
+        if home is not None:
+            condor_options["x509userproxy"] = home + "/x509up_u{0}".format(os.geteuid())
+
+    if ncpu > 1:
+        condor_options['RequestCpus'] = str(ncpu)
+    j.set_custom(condor_options)
+
+    return j

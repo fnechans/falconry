@@ -1,9 +1,9 @@
 #!/usr/bin/env python
 import logging
-from .manager import manager
-from .job import job
+from .manager import manager, Mode
+from .job import job, quick_job
+from .schedd_wrapper import kerberos_auth
 import os
-import htcondor
 import argparse
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s (%(name)s): %(message)s")
@@ -64,6 +64,18 @@ def config() -> argparse.ArgumentParser:
         default=1,
         help='Number of cpus to request. Default is 1',
     )
+    parser.add_argument(
+        '--remote',
+        action='store_true',
+        help='Skips directly to loading and disables user interface, not generally recommended and mostly indended for internal use.',
+    )
+    parser.add_argument(
+        '--tmux',
+        action='store_true',
+        help='Submits separate session in tmux which is responsible for submitting '
+            'and monitoring jobs. Local instance only prints the status of jobs '
+            'and processes user input.',
+    )
     return parser
 
 
@@ -83,58 +95,6 @@ def get_name(command: str) -> str:
     return '_'.join([x for x in command.split('_') if x != ''])
 
 
-def create_job(name: str, command: str, mgr: manager, time: int, ncpu: int = 1) -> job:
-    """Create job for given command.
-
-    Arguments:
-        name (str): name of the job
-        command (str): command to run
-        mgr (manager): HTCondor manager
-        time (int): expected runtime
-    Returns:
-        job: created job
-    """
-    # define job and pass the HTCondor schedd to it
-    j = job(name, mgr.schedd)
-
-    # set the executable and the path to the log files
-    main_path = os.path.dirname(os.path.abspath(__file__))
-    executable = os.path.join(main_path, 'run_simple.sh')
-    if not os.path.isfile(executable):
-        log.error(f'Failed to find executable {executable}')
-        raise FileNotFoundError
-    j.set_simple(
-        executable,
-        mgr.dir + "/log/",
-    )
-
-    is_desy = "desy.de" in str(mgr.schedd.schedd.location)
-
-    # expected runtime
-    j.set_time(time, useRequestRuntime=is_desy)
-
-    # set the command
-    j.set_arguments(f'{name} {command}')
-
-    # and environenment
-    basedir = os.path.abspath('.')
-    env = f'basedir={basedir};'
-
-    condor_options = {'environment': env, 'getenv': 'True'}
-    # Some cluster specific settings which might break submission on other clusters
-    if "cern.ch" in str(mgr.schedd.schedd.location):
-        condor_options["MY.SendCredential"] = "True"
-    elif is_desy:
-        condor_options["MY.SendCredential"] = "True"
-        condor_options["Requirements"] = '(OpSysAndVer == "RedHat9")'
-
-    if ncpu > 1:
-        condor_options['RequestCpus'] = str(ncpu)
-    j.set_custom(condor_options)
-
-    return j
-
-
 class Block:
     """Holds a block of commands and handles adding them to the manager.
 
@@ -144,6 +104,7 @@ class Block:
     def __init__(self) -> None:
         self.commands: dict[str, job] = {}
         self._lock: bool = False  # No more commands can be added
+        self.dependencies: list[job] = []
 
     def add_command(self, command: str, mgr: manager, time: int, ncpu: int = 1) -> None:
         """Add command to block and manager.
@@ -164,13 +125,15 @@ class Block:
         if name in self.commands:
             log.error(f'Block {name} already has command {self.commands[name]}')
             raise AttributeError
-        self.commands[name] = create_job(name, command, mgr, time, ncpu)
+        self.commands[name] = quick_job(name, command, mgr.schedd, mgr.dir + '/log', time, ncpu)
         mgr.add_job(self.commands[name])
         log.info(f'Added command `{command}` to falconry')
 
     def lock(self) -> None:
         """Lock block, no more commands can be added"""
         self._lock = True
+        for j in self.commands.values():
+            j.add_job_dependency(*self.dependencies)
 
     def add_dependency(self, dependency: 'Block') -> None:
         """Add dependency between blocks, also locks current block.
@@ -178,8 +141,7 @@ class Block:
         Args:
             dependency (Block): block to add as dependency
         """
-        for j in self.commands.values():
-            j.add_job_dependency(*dependency.commands.values())
+        self.dependencies.extend(dependency.commands.values())
 
     @property
     def empty(self) -> bool:
@@ -220,46 +182,55 @@ def process_commands(commands: str, mgr: manager, time: int, ncpu: int = 1) -> N
         command = ' '.join(command.split())
 
         current_block.add_command(command, mgr, time, ncpu)
-
+    current_block.lock()
 
 def main() -> None:
     """Main function for `falconry`"""
 
-    try:
-        credd = htcondor.Credd()
-        credd.add_user_cred(htcondor.CredTypes.Kerberos, None)
-    except:
-        log.warning(
-            "Kerberos creds not available. This can cause problems on some clusters (like lxplus)."
-        )
-
+    kerberos_auth()
+    print("test")
     log.info('Setting up `falconry` to run your commands')
     cfg = config().parse_args()
-    tpcondor_dir = os.path.join(cfg.dir, cfg.subdir)
-    mgr = manager(tpcondor_dir)  # the argument specifies where the job is saved
+    condor_dir = os.path.join(cfg.dir, cfg.subdir)
+    mode = Mode.NORMAL if not cfg.tmux else Mode.LOCAL
+    if cfg.remote:
+        mode = Mode.REMOTE
+    mgr = manager(condor_dir, mode=mode)  # the argument specifies where the job is saved
+
 
     if cfg.verbose:
         log.setLevel(logging.DEBUG)
         logging.getLogger('falconry').setLevel(logging.DEBUG)
 
-    # Check if to run previous instance
-    load = False
-    status, var = mgr.check_savefile_status()
-
-    if status == True:
-        if var == "l":
-            load = True
+    if cfg.remote:
+        if cfg.remote:
+            log.addHandler(logging.FileHandler(os.path.join(condor_dir, 'falconry.remote.log')))
+        else:
+            log.addHandler(logging.FileHandler(os.path.join(condor_dir, 'falconry.log')))
+        mgr.load()
     else:
-        return
+        # Check if to run previous instance
+        load = False
+        status, var = mgr.check_savefile_status()
+        if cfg.remote:
+            log.addHandler(logging.FileHandler(os.path.join(condor_dir, 'falconry.remote.log')))
+        else:
+            log.addHandler(logging.FileHandler(os.path.join(condor_dir, 'falconry.log')))
 
-    # Ask for message to be saved in the save file
-    # Alwayas good to have some documentation ...
-    mgr.ask_for_message()
+        if status == True:
+            if var == "l":
+                load = True
+        else:
+            return
 
-    if load:
-        mgr.load(cfg.retry_failed)
-    else:
-        process_commands(cfg.commands, mgr, cfg.set_time, cfg.ncpu)
+        # Ask for message to be saved in the save file
+        # Alwayas good to have some documentation ...
+        mgr.ask_for_message()
+
+        if load:
+            mgr.load(cfg.retry_failed)
+        else:
+            process_commands(cfg.commands, mgr, cfg.set_time, cfg.ncpu)
     if cfg.dry:
         return
     # start the manager

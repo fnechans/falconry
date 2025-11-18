@@ -1,4 +1,4 @@
-import htcondor  # for submitting jobs, querying HTCondor daemons, etc.
+import htcondor2 as htcondor
 import logging
 import functools
 from typing import Callable, Any
@@ -15,7 +15,7 @@ def schedd_check(func: Callable[["ScheddWrapper"], Any]) -> Any:
     ) -> Callable[["ScheddWrapper"], Any]:
         try:
             return func(self, *args, **kwargs)
-        except htcondor.HTCondorIOError:
+        except htcondor.HTCondorException:
             log.warning(
                 "Possible problem with scheduler, waiting a bit and reloading schedd ..."
             )
