@@ -473,7 +473,7 @@ def quick_job(name: str, command: str, schedd: ScheddWrapper, logDir: str, time:
         logDir,
     )
 
-    is_desy = "desy.de" in str(schedd.schedd._addr)
+    is_desy = "desy.de" in schedd.location
 
     # expected runtime
     j.set_time(time, useRequestRuntime=is_desy)
@@ -487,12 +487,12 @@ def quick_job(name: str, command: str, schedd: ScheddWrapper, logDir: str, time:
 
     condor_options = {'environment': env, 'getenv': 'True'}
     # Some cluster specific settings which might break submission on other clusters
-    if "cern.ch" in str(schedd.schedd._addr):
+    if "cern.ch" in str(schedd.location):
         condor_options["MY.SendCredential"] = "True"
     elif is_desy:
         condor_options["MY.SendCredential"] = "True"
         condor_options["Requirements"] = '(OpSysAndVer == "RedHat9")'
-    if 'particle.cz' in str(schedd.schedd._addr):
+    if 'particle.cz' in str(schedd.location):
         home = os.getenv("HOME")
         if home is not None:
             condor_options["x509userproxy"] = home + "/x509up_u{0}".format(os.geteuid())

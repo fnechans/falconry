@@ -43,6 +43,11 @@ class ScheddWrapper:
     def __init__(self) -> None:
         self.schedd = htcondor.Schedd()
 
+    @property
+    def location(self) -> str:
+        """Return the address of the schedd"""
+        return str(self.schedd._addr)
+
     """Reimplementing all the used functions"""
 
     @schedd_check
