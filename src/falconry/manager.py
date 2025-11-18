@@ -122,7 +122,7 @@ class manager:
         self.keepSaveFiles = keepSaveFiles
         self.mode = mode
 
-    def submit_remote_job(self):
+    def submit_remote_job(self) -> None:
         """Creates tmux session for remote manager."""
         if self.mode != Mode.LOCAL:
             raise Exception("Manager is not in LOCAL mode")

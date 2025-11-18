@@ -3,7 +3,7 @@
 # Provides simulated functionality for HTCondor, including
 # job submission, querying, and management
 from collections import defaultdict
-import htcondor
+import htcondor2 as htcondor
 import logging
 
 log = logging.getLogger('falconry')
