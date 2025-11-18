@@ -56,6 +56,9 @@ class job:
         # to setup initial state (done/submitted and so on)
         self.reset()
 
+        # keep track of last status to avoid calling get_status too often
+        self.lastStatus: FalconryStatus = FalconryStatus.UNKNOWN
+
     def set_simple(self, exe: str, logPath: str) -> None:
         """Sets up a simple job with only executable and a path to log files
 
@@ -318,12 +321,21 @@ class job:
         return ads[0]  # we take only single job, so return onl the first eleement
 
     def get_status(self) -> FalconryStatus:
+        """Updates status of the job and returns it.
+        Status is defined in status.py
+
+        Returns:
+            int: status of the job
+        """
+        self.lastStatus = self._get_status()
+        return self.lastStatus
+
+    def _get_status(self) -> FalconryStatus:
         """Returns status of the job, as defined in status.py
 
         Returns:
             int: status of the job
         """
-        self.find_id()
 
         # First check if the job is skipped or not even submitted
         if self.skipped:

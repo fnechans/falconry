@@ -188,7 +188,6 @@ def main() -> None:
     """Main function for `falconry`"""
 
     kerberos_auth()
-    print("test")
     log.info('Setting up `falconry` to run your commands')
     cfg = config().parse_args()
     condor_dir = os.path.join(cfg.dir, cfg.subdir)

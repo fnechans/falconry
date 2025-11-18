@@ -339,18 +339,22 @@ class manager:
                 self.print_failed()
                 sys.exit(1)
 
-    # print names of all failed jobs
     def print_running(self, printLogs: bool = False) -> None:
+        """Prints names of all running jobs.
+
+        Arguments:
+            printLogs (bool, optional): whether to print paths to logs.
+                Defaults to False.
+        """
         log.info("Printing running jobs:")
         for name, j in self.jobs.items():
-            if j.get_status() == FalconryStatus.RUNNING:
+            if j.lastStatus == FalconryStatus.RUNNING:
                 log.info(f"{name} (id {j.jobID})")
                 if printLogs:
                     log.info(f"log: {j.logFile}")
                     log.info(f"out: {j.outFile}")
                     log.info(f"err: {j.errFile}")
 
-    # print names of all failed jobs
     def print_failed(self, printLogs: bool = False) -> None:
         """Prints names of all failed jobs.
 
@@ -360,7 +364,7 @@ class manager:
         """
         log.info("Printing failed jobs:")
         for name, j in self.jobs.items():
-            if j.get_status() == FalconryStatus.FAILED:
+            if j.lastStatus == FalconryStatus.FAILED:
                 log.info(f"{name} (id {j.jobID})")
                 if printLogs:
                     log.info(f"log: {j.logFile}")
@@ -369,7 +373,7 @@ class manager:
         # TODO: maybe separate failed and removed?
         log.info("Printing removed jobs:")
         for name, j in self.jobs.items():
-            if j.get_status() == FalconryStatus.REMOVED:
+            if j.lastStatus == FalconryStatus.REMOVED:
                 log.info(f"{name} (id {j.jobID})")
                 if printLogs:
                     log.info(f"log: {j.logFile}")
@@ -420,14 +424,19 @@ class manager:
                 self.sub_queue.append(j)
                 self.curJobIdle += 1  # Add the jobs as a idle for now
 
-    def _check_resubmit(self, j: job, retryFailed: bool = False) -> None:
+    def _check_resubmit(self, j: job, retryFailed: bool = False) -> FalconryStatus:
         """Checks if a job should be resubmitted due to some known problems.
 
         Arguments:
             j (job): job to check
             retryFailed (bool, optional): whether to also retry failed jobs.
                 Defaults to False.
+
+        Returns:
+            FalconryStatus: latest status of the job
         """
+        if self.mode != Mode.NORMAL:
+            j.find_id()
         status = j.get_status()
         log.debug("Job %s has status %s", j.name, status.name)
         if status is FalconryStatus.ABORTED_BY_USER:
@@ -466,6 +475,11 @@ class manager:
                 f"Error! Job {j.name} was skipped and will be retried, rerunning"
             )
             j.skipped = False
+        # If job did not change, return original status,
+        # otherwise return new status
+        else:
+            return status
+        return j.get_status()
 
     def _count_jobs(self, counter: Counter) -> None:
         """Counts the number of jobs with different status.
@@ -499,7 +513,8 @@ class manager:
             c (counter): counter object to update
             j (job): job to check
         """
-        j.find_id()
+        if self.mode != Mode.NORMAL:
+            j.find_id()
 
         # first check if job is not submitted, skipped or done
         if j.skipped:
@@ -514,10 +529,10 @@ class manager:
 
         #  resubmit job which failed due to condor problems
         if self.mode != Mode.LOCAL:
-            self._check_resubmit(j)
+            status = self._check_resubmit(j)
+        else:
+            status = j.get_status()
 
-        # count job with different status
-        status = j.get_status()
         if (
             status == FalconryStatus.NOT_SUBMITTED
             or status == FalconryStatus.LOG_FILE_MISSING
@@ -763,7 +778,6 @@ class manager:
                 return False
             elif var == "retry all":
                 for j in self.jobs.values():
-                    j.find_id()  # in case job was resubmited on remote
                     self._check_resubmit(j, True)
 
         return True
