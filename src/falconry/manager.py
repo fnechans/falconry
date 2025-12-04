@@ -593,26 +593,21 @@ class manager:
             #
             log.debug("Submitting %i jobs with executable %s", len(jobs), exe)
 
-            job_pars = [x.config for x in jobs]
-            all_pars = set(sum([list(x.keys()) for x in job_pars], []))
-
-            def var_name(x: str) -> str:
-                return f"VAR_{x}".replace("+", "p")
-
-            pars_dict = {x: f'$({var_name(x)})' for x in all_pars if x not in ignore}
             job_pars_variable = []
-            for par in job_pars:
-                tmp = {}
-                for k, v in par.items():
-                    if k not in ignore:
-                        tmp[var_name(k)] = v
-                job_pars_variable.append(tmp)
+            for j in jobs:
+                new_config = {}
+                for k, v in j.config.items():
+                    if k in ignore:
+                        continue
+                    if k.startswith("+"):
+                        k = "MY." + k[1:]
+                    new_config[k] = v
+                job_pars_variable.append(new_config)
 
             base_pars = {
                 "executable": exe,
                 "log": jobs[0].config["log"],
             }
-            base_pars.update(pars_dict)
             base_submit = htcondor.Submit(base_pars)
             result = self.schedd.submit(base_submit, itemdata=iter(job_pars_variable))
 

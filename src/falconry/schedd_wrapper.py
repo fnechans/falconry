@@ -15,10 +15,11 @@ def schedd_check(func: Callable[["ScheddWrapper"], Any]) -> Any:
     ) -> Callable[["ScheddWrapper"], Any]:
         try:
             return func(self, *args, **kwargs)
-        except htcondor.HTCondorException:
+        except htcondor.HTCondorException as e:
             log.warning(
                 "Possible problem with scheduler, waiting a bit and reloading schedd ..."
             )
+            log.debug(str(e))
             time.sleep(60)
             self.schedd = htcondor.Schedd()
             return func(self, *args, **kwargs)
