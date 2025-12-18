@@ -1,7 +1,8 @@
 #!/usr/bin/env python
 import logging
 from .manager import manager, Mode
-from .job import job, quick_job
+from .job import job
+from .quick_job import quick_job
 from .schedd_wrapper import kerberos_auth
 import os
 import argparse

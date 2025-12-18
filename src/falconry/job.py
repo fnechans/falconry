@@ -2,6 +2,7 @@ import htcondor2 as htcondor
 import os
 import logging
 import glob
+from copy import copy
 
 from typing import List, Dict, Any, Optional
 
@@ -44,8 +45,12 @@ class job:
 
         # since we will be resubmitting, job IDs are kept as a list
         self.jobIDs: List[str] = []
-        self.jobID: str = ""
+        self.jobID: Optional[str] = None
         self.jobDir: Optional[str] = None
+        # For sanity check that new ID is indeed newer
+        # (in case we are deducing new ID from log files for example,
+        #  and the jobIDs got reset for some reason)
+        self.jobTimeStamp: Optional[int] = None
 
         # add a decoration to the job to hold dependencies
         self.dependencies: List["job"] = []
@@ -102,6 +107,7 @@ class job:
         jobDict = {
             "jobIDs": self.jobIDs,
             "jobDir": self.jobDir,
+            "jobTimeStamp": self.jobTimeStamp,
             "config": self.config,
             "depNames": depNames,
             "done": "false",
@@ -138,6 +144,7 @@ class job:
         # set cluster IDs
         self.jobIDs = jobDict["jobIDs"]
         self.jobDir = jobDict["jobDir"]
+        self.jobTimeStamp = jobDict["jobTimeStamp"]
 
         # if not empty, the job has been already submitted at least once
         if len(self.jobIDs) > 0:
@@ -211,14 +218,31 @@ class job:
         logFiles.sort(reverse=True)
         if len(logFiles) == 0:
             return
-        jobid = os.path.basename(logFiles[0]).strip(".log")
-        self.submit_done(jobid)
+        for logFile in logFiles:
+            jobid = os.path.basename(logFile).strip(".log")
+            if jobid not in self.jobIDs:
+                tmp_copy = copy(self)
+                tmp_copy.jobID = jobid
+                timestamp = int(tmp_copy.get_info()["QDate"])
+                if (
+                    self.jobTimeStamp is not None
+                    and timestamp != -999
+                    and timestamp < self.jobTimeStamp
+                ):
+                    continue
+                self.submit_done(jobid)
 
     def submit_done(self, jobID: str) -> None:
-        """Sets the job as submitted and updates cluster ID"""
+        """Sets the job as submitted and updates job ID
+
+        Arguments:
+            jobID (str): job ID
+        """
         if jobID in self.jobIDs:
+            log.debug(f'Job {self.name} has already been submitted with id {jobID}')
             return
         self.jobID = jobID
+        self.jobTimeStamp = int(self.get_info()["QDate"])
         self.jobIDs.append(self.jobID)
         log.info(f"Job {self.name}: found id {self.jobID}")
         log.debug(self.config)
@@ -237,6 +261,8 @@ class job:
 
         if self.jobDir is None:
             raise RuntimeError('Job directory is not set for job %s' % self.name)
+        if self.jobID is None:
+            raise RuntimeError('Job ID is not set for job %s' % self.name)
 
         self.logFile = os.path.join(self.jobDir, f"{self.jobID}.log")
         logFile = self.config["log"].replace("$(JobId)", self.jobID)
@@ -249,11 +275,13 @@ class job:
     @property
     def clusterId(self) -> str:
         """Returns cluster ID"""
+        assert self.jobID is not None, "Job ID is not set to determine cluster ID"
         return self.jobID.split(".")[0]
 
     @property
     def procId(self) -> str:
         """Returns proc ID"""
+        assert self.jobID is not None, "Job ID is not set to determine proc ID"
         return self.jobID.split(".")[1]
 
     @property
@@ -263,7 +291,7 @@ class job:
 
     def release(self) -> bool:
         """Releases held job"""
-        if self.jobIDs == []:
+        if self.jobID == None:
             return False
         self.schedd.act(
             htcondor.JobAction.Release, self.act_constraints  # type: ignore
@@ -273,7 +301,7 @@ class job:
 
     def remove(self) -> bool:
         """Removes the job from HTCondor"""
-        if self.jobIDs == []:
+        if self.jobID == None:
             return False
         self.schedd.act(htcondor.JobAction.Remove, self.act_constraints)  # type: ignore
         log.info("Removing job %s with id %s", self.name, self.jobID)
@@ -286,12 +314,12 @@ class job:
             Dict[str, Any]: dictionary containing job information
         """
         # check if job has an ID
-        if self.jobIDs == []:
+        if self.jobID == None:
             log.error("Trying to list info for a job which was not submitted")
             raise SystemError
 
         # get all job info of running job
-        ads = self.schedd.query(constraint=self.act_constraints)
+        ads = self.schedd.query(constraint=self.act_constraints, projection=["JobStatus", "QDate"])
 
         # if the job finished, query will be empty and we have to use history
         # because condor is stupid, it returns and iterator (?),
@@ -299,7 +327,7 @@ class job:
         # TODO: add more to projection
         if ads == []:
             for ad in self.schedd.history(
-                constraint=self.act_constraints, projection=["JobStatus"]
+                constraint=self.act_constraints, projection=["JobStatus", "QDate"]
             ):
                 return ad
 
@@ -309,7 +337,7 @@ class job:
             # return specific code -999 and let get_status function
             # sort the rest from the log files
             if ads == []:
-                return {"JobStatus": -999}
+                return {"JobStatus": -999, "QDate": -999}
             else:
                 log.error(
                     "HTCondor returned more than one jobs for given ID, this should not happen!"
@@ -342,7 +370,7 @@ class job:
             return FalconryStatus.SKIPPED
         elif self.done:
             return FalconryStatus.COMPLETE
-        elif self.jobIDs == []:  # job was not even submitted
+        elif self.jobID == None:  # job was not even submitted
             return FalconryStatus.NOT_SUBMITTED
         # Using exists here is crucial, it returns false for broken symlinks
         elif not os.path.exists(self.logFile):
@@ -446,59 +474,3 @@ class job:
             args (str): arguments for the job
         """
         self.config["arguments"] = args
-
-
-def quick_job(name: str, command: str, schedd: ScheddWrapper, logDir: str, time: int, ncpu: int = 1) -> job:
-    """Create job for given command.
-
-    Arguments:
-        name (str): name of the job
-        command (str): command to run
-        mgr (manager): HTCondor manager
-        time (int): expected runtime
-    Returns:
-        job: created job
-    """
-    # define job and pass the HTCondor schedd to it
-    j = job(name, schedd)
-
-    # set the executable and the path to the log files
-    main_path = os.path.dirname(os.path.abspath(__file__))
-    executable = os.path.join(main_path, 'run_simple.sh')
-    if not os.path.isfile(executable):
-        log.error(f'Failed to find executable {executable}')
-        raise FileNotFoundError
-    j.set_simple(
-        executable,
-        logDir,
-    )
-
-    is_desy = "desy.de" in schedd.location
-
-    # expected runtime
-    j.set_time(time, useRequestRuntime=is_desy)
-
-    # set the command
-    j.set_arguments(f'{name} {command}')
-
-    # and environenment
-    basedir = os.path.abspath('.')
-    env = f'basedir={basedir};'
-
-    condor_options = {'environment': env, 'getenv': 'True'}
-    # Some cluster specific settings which might break submission on other clusters
-    if "cern.ch" in str(schedd.location):
-        condor_options["MY.SendCredential"] = "True"
-    elif is_desy:
-        condor_options["MY.SendCredential"] = "True"
-        condor_options["Requirements"] = '(OpSysAndVer == "RedHat9")'
-    if 'particle.cz' in str(schedd.location):
-        home = os.getenv("HOME")
-        if home is not None:
-            condor_options["x509userproxy"] = home + "/x509up_u{0}".format(os.geteuid())
-
-    if ncpu > 1:
-        condor_options['RequestCpus'] = str(ncpu)
-    j.set_custom(condor_options)
-
-    return j

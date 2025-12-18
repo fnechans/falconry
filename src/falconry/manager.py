@@ -115,6 +115,9 @@ class manager:
     ):
         log.info("MONITOR: INIT")
 
+        if mode != Mode.NORMAL:
+            log.warning(f"Manager in run experimental mode. Please report any issues.")
+
         # Initialize the manager, maily getting the htcondor schedd
         if schedd is not None:
             self.schedd = schedd
@@ -653,7 +656,7 @@ class manager:
                 self.save()
             event_counter += 1
 
-            if self.mode:
+            if self.mode == Mode.REMOTE:
                 sleep(sleep_time)
             elif not self._cli_interface(sleep_time):
                 break

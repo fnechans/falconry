@@ -5,6 +5,7 @@
 from collections import defaultdict
 import htcondor2 as htcondor
 import logging
+import time
 
 log = logging.getLogger('falconry')
 
@@ -33,6 +34,7 @@ class MockSchedd:
             self.job_queue[job_id] = {
                 "JobDescription": job_description,
                 "JobStatus": MockHTCondor.job_status_map()["Idle"],
+                "QDate": int(time.time()),
             }
         self.job_id_counter += 1
         return MockSubmitResult(self.job_id_counter - 1)
