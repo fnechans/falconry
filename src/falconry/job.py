@@ -224,10 +224,8 @@ class job:
                 tmp_copy = copy(self)
                 tmp_copy.jobID = jobid
                 timestamp = int(tmp_copy.get_info()["QDate"])
-                if (
-                    self.jobTimeStamp is not None
-                    and timestamp != -999
-                    and timestamp < self.jobTimeStamp
+                if self.jobTimeStamp is not None and (
+                    timestamp == -999 or timestamp < self.jobTimeStamp
                 ):
                     continue
                 self.submit_done(jobid)
@@ -319,7 +317,9 @@ class job:
             raise SystemError
 
         # get all job info of running job
-        ads = self.schedd.query(constraint=self.act_constraints, projection=["JobStatus", "QDate"])
+        ads = self.schedd.query(
+            constraint=self.act_constraints, projection=["JobStatus", "QDate"]
+        )
 
         # if the job finished, query will be empty and we have to use history
         # because condor is stupid, it returns and iterator (?),
