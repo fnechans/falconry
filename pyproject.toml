@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "falconry"
-version = "0.2.11"
+version = "0.3.0"
 authors = [
   { name="Filip Nechansky", email="filip.nechansky@protonmail.com" },
 ]
@@ -20,7 +20,7 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
 ]
 dependencies = [
-    "htcondor>=24.2.1,<25",
+    "htcondor>=25",
     "ijson>=3.3.0",
 ]
 

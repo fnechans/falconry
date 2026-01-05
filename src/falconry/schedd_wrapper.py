@@ -1,4 +1,4 @@
-import htcondor  # for submitting jobs, querying HTCondor daemons, etc.
+import htcondor2 as htcondor
 import logging
 import functools
 from typing import Callable, Any
@@ -15,10 +15,11 @@ def schedd_check(func: Callable[["ScheddWrapper"], Any]) -> Any:
     ) -> Callable[["ScheddWrapper"], Any]:
         try:
             return func(self, *args, **kwargs)
-        except htcondor.HTCondorIOError:
+        except htcondor.HTCondorException as e:
             log.warning(
                 "Possible problem with scheduler, waiting a bit and reloading schedd ..."
             )
+            log.debug(str(e))
             time.sleep(60)
             self.schedd = htcondor.Schedd()
             return func(self, *args, **kwargs)
@@ -42,6 +43,11 @@ class ScheddWrapper:
 
     def __init__(self) -> None:
         self.schedd = htcondor.Schedd()
+
+    @property
+    def location(self) -> str:
+        """Return the address of the schedd"""
+        return str(self.schedd._addr)
 
     """Reimplementing all the used functions"""
 
