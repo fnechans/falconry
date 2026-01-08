@@ -12,12 +12,14 @@ import htcondor2 as htcondor
 import copy
 from glob import glob
 import subprocess
-from typing import Any
+from typing import Any, Union
+
 try:
     from contextlib import chdir  # type: ignore
 except ImportError:
     # Simple copy from python source for python <= 3.11
     from contextlib import AbstractContextManager
+
     class chdir(AbstractContextManager):  # type: ignore
         """Non thread-safe context manager to change the current working directory."""
 
@@ -31,6 +33,7 @@ except ImportError:
 
         def __exit__(self, *excinfo: Any) -> None:
             os.chdir(self._old_cwd.pop())
+
 
 from typing import Dict, Any, Tuple, Optional
 
@@ -87,6 +90,18 @@ class Mode:
     REMOTE = 2
 
 
+class LockFile:
+    def __init__(self, path: str) -> None:
+        self.path = path
+
+    def __enter__(self) -> None:
+        with open(self.path, "w") as f:
+            f.write("")
+
+    def __exit__(self, *excinfo: Any) -> None:
+        os.remove(self.path)
+
+
 class manager:
     """Manager holds all jobs and periodically checks their status.
 
@@ -133,10 +148,17 @@ class manager:
             os.makedirs(mgrDir)
         self.dir = mgrDir
         self.saveFileName = self.dir + "/data.json"
+        self.lockFile = self.dir + "/lock"
         if mode == Mode.REMOTE:
             self.saveFileName = self.dir + "/remote.data.json"
-        self.mgrMsg = mgrMsg
-        self.command = " ".join(sys.argv)
+            self.lockFile = self.dir + "/remote.lock"
+
+        self.check_lock()
+
+        self.mgrMsg = [
+            f"{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}: {mgrMsg}"
+        ]
+        self.command = [" ".join(sys.argv)]
 
         self.maxJobIdle = maxJobIdle
         self.curJobIdle = 0
@@ -159,7 +181,14 @@ class manager:
             if not run_command_local(command):
                 raise Exception('Failed to start remote manager')
 
-    # check if save file already exists
+    def check_lock(self) -> None:
+        """Raises an exception if the lock file already exists.
+
+        This indicates that the manager is already running.
+        """
+        if os.path.exists(self.lockFile):
+            raise Exception(f"Manager instance is already running in {self.dir}")
+
     def check_savefile_status(self) -> Tuple[bool, Optional[str]]:
         """Checks if the save file already exists. If it does, asks the user
         whether to load existing jobs or start new ones.
@@ -221,9 +250,9 @@ class manager:
         """Asks user for a message to be saved in the save file for bookkeeping."""
 
         log.info("Enter a message to be saved in the save file " "for bookkeeping.")
-        i, o, e = select.select([sys.stdin], [], [], 60)
+        i, _, _ = select.select([sys.stdin], [], [], 60)
         if i:
-            self.mgrMsg = sys.stdin.readline().strip()
+            self.mgrMsg = [sys.stdin.readline().strip()]
 
     def add_job(self, j: job, update: bool = False) -> None:
         """Adds a job to the manager. If the job already exists and `update` is
@@ -279,6 +308,9 @@ class manager:
         fileLatest = f"{saveFileName}.latest"
         fileSuf = f"{saveFileName}.{current_time}"  # only if not quiet
 
+        is_first = not os.path.exists(fileLatest)
+        fileFirst = f"{saveFileName}.first"
+
         with open(fileLatest, "w") as f:
             json.dump(output, f, indent=2)
         if not quiet:
@@ -291,6 +323,8 @@ class manager:
                     f"Destination file {fileSuf} already exists. "
                     "This should not be possible."
                 )
+        if is_first:
+            shutil.copyfile(fileLatest, fileFirst)
 
         # not necessary to remove, but maybe better to be sure its not broken
         if os.path.exists(saveFileName):
@@ -299,10 +333,15 @@ class manager:
 
         # clean up old save files
         files = glob(f"{saveFileName}.*")
+        # remove first/latest
+        # in principle the conditions are not necessary...
+        if fileFirst in files:
+            files.remove(fileFirst)
+        if fileLatest in files:
+            files.remove(fileLatest)
         # sort based on time-stamp
         files.sort()
-        # Here -1 because of the `latest`
-        files = files[: -self.keepSaveFiles - 1]
+        files = files[: -self.keepSaveFiles]
         for fl in files:
             log.debug(f"Removing old save file {fl}")
             os.remove(fl)
@@ -315,11 +354,23 @@ class manager:
             retryFailed (bool, optional): whether to retry the failed jobs.
             Defaults to False.
         """
+        self.check_lock()
         log.info("Loading past status of jobs")
         with open(self.saveFileName, "rb") as f:
             depNames = {}
+
+            def prepend(old: Union[str, list[str]], new: list[str]) -> list[str]:
+                if isinstance(old, list):
+                    return old + new
+                else:
+                    return [old] + new
+
             for name, jobDict in ijson.kvitems(f, ""):
                 if name in manager.reservedNames:
+                    if name == "Message":
+                        self.mgrMsg = prepend(jobDict, self.mgrMsg)
+                    elif name == "Command":
+                        self.command = prepend(jobDict, self.command)
                     continue
                 log.debug("Loading job %s", name)
 
@@ -706,7 +757,11 @@ class manager:
             "tmux has-session -t falconry_remote" + self.dir
         ):
             self._print_summary(c)
-            log.error("Remote manager is not running anymore!")
+            log.error(
+                "Remote manager is not running anymore! "
+                "Check falconry.remote.log in the manager "
+                "directory for more info."
+            )
             return False
 
         # only printout if something changed:
@@ -782,6 +837,10 @@ class manager:
                 log.info(
                     "|-Enter 'x' to exit, 's' to save or 'retry all' to retry all failed---|"
                 )
+                if self.mode == Mode.LOCAL:
+                    log.info(
+                        "|-Enter 'quit' to completely quit the manager, including remote--|"
+                    )
                 self._cli_interface(sleep_time)
             elif var == "ff":
                 self.print_failed(True)
@@ -791,6 +850,11 @@ class manager:
                 self.print_running(True)
             elif var == "x":
                 log.info("MONITOR: EXITING")
+                return False
+            elif var == "quit":
+                log.info("MONITOR: EXITING")
+                if self.mode == Mode.LOCAL:
+                    run_command_local("tmux kill-session -t falconry_remote" + self.dir)
                 return False
             elif var == "retry all":
                 for j in self.jobs.values():
@@ -836,7 +900,7 @@ class manager:
         labels["d"] = quick_label("0", 4, 1)
         labels["w"] = quick_label("0", 5, 1)
         labels["s"] = quick_label("0", 6, 1)
-        labels["rm"] = quick_label("0", 1)
+        labels["rm"] = quick_label("0", 7, 1)
 
         frm_counter.grid(row=0, column=0)
 
@@ -877,10 +941,12 @@ class manager:
                 GUI is experimental!
         """
         try:
-            if gui:
-                self._start_gui(sleepTime)
-            else:
-                self._start_cli(sleepTime)
+            self.check_lock()
+            with LockFile(self.lockFile):
+                if gui:
+                    self._start_gui(sleepTime)
+                else:
+                    self._start_cli(sleepTime)
         except KeyboardInterrupt:
             log.error("Manager interrupted with keyboard!")
             log.error("Saving and exitting ...")
