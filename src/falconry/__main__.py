@@ -203,19 +203,13 @@ def main() -> None:
         logging.getLogger('falconry').setLevel(logging.DEBUG)
 
     if cfg.remote:
-        if cfg.remote:
-            log.addHandler(logging.FileHandler(os.path.join(condor_dir, 'falconry.remote.log')))
-        else:
-            log.addHandler(logging.FileHandler(os.path.join(condor_dir, 'falconry.log')))
+        log.addHandler(logging.FileHandler(os.path.join(condor_dir, 'falconry.remote.log')))
         mgr.load()
     else:
         # Check if to run previous instance
         load = False
         status, var = mgr.check_savefile_status()
-        if cfg.remote:
-            log.addHandler(logging.FileHandler(os.path.join(condor_dir, 'falconry.remote.log')))
-        else:
-            log.addHandler(logging.FileHandler(os.path.join(condor_dir, 'falconry.log')))
+        log.addHandler(logging.FileHandler(os.path.join(condor_dir, 'falconry.log')))
 
         if status == True:
             if var == "l":
