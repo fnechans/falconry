@@ -12,7 +12,7 @@ import htcondor2 as htcondor
 import copy
 from glob import glob
 import subprocess
-from typing import Any, Union
+from typing import Any, Union, TypeVar, Callable, cast
 
 try:
     from contextlib import chdir  # type: ignore
@@ -101,6 +101,16 @@ class LockFile:
     def __exit__(self, *excinfo: Any) -> None:
         os.remove(self.path)
 
+class LockFileException(Exception):
+    pass
+
+FuncT = TypeVar("FuncT", bound=Callable[..., Any])
+def lock(func: FuncT) -> FuncT:
+    def wrapper(*args: Any, **kwargs: Any) -> Any:
+        args[0]._check_lock()
+        with LockFile(args[0].lockFile):
+            return func(*args, **kwargs)
+    return cast(FuncT, wrapper)
 
 class manager:
     """Manager holds all jobs and periodically checks their status.
@@ -153,7 +163,10 @@ class manager:
             self.saveFileName = self.dir + "/remote.data.json"
             self.lockFile = self.dir + "/remote.lock"
 
-        self.check_lock()
+        try:
+            self._check_lock()
+        except LockFileException:
+            sys.exit(1)
 
         self.mgrMsg = [
             f"{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}: {mgrMsg}"
@@ -165,11 +178,11 @@ class manager:
         self.keepSaveFiles = keepSaveFiles
         self.mode = mode
 
-    def submit_remote_job(self) -> None:
+    def _submit_remote_job(self) -> None:
         """Creates tmux session for remote manager."""
         if self.mode != Mode.LOCAL:
             raise Exception("Manager is not in LOCAL mode")
-        self.save(prefix='remote.')
+        self._save(prefix='remote.')
         log.info('Starting remote manager')
         # To get log files in the right place, we
         # run tmux from within the `self.dir`
@@ -181,14 +194,17 @@ class manager:
             if not run_command_local(command):
                 raise Exception('Failed to start remote manager')
 
-    def check_lock(self) -> None:
+    def _check_lock(self) -> None:
         """Raises an exception if the lock file already exists.
 
         This indicates that the manager is already running.
         """
         if os.path.exists(self.lockFile):
-            raise Exception(f"Manager instance is already running in {self.dir}")
+            log.error(f"Manager instance is already running in {self.dir}")
+            log.debug(f"Delete {self.lockFile} to start a new instance if you think this is a mistake")
+            raise LockFileException
 
+    @lock
     def check_savefile_status(self) -> Tuple[bool, Optional[str]]:
         """Checks if the save file already exists. If it does, asks the user
         whether to load existing jobs or start new ones.
@@ -221,6 +237,10 @@ class manager:
                     log.info("Deleting old manager directory")
                     shutil.rmtree(self.dir)
                     os.makedirs(self.dir)
+                    # create lock file again as it was deleted ...
+                    # TODO: is there better way?
+                    with open(self.lockFile, "w") as f:
+                        f.write("")
 
                 return True, var
             return False, var
@@ -246,6 +266,7 @@ class manager:
 
         return True, "n"  # automatically assume new
 
+    @lock
     def ask_for_message(self) -> None:
         """Asks user for a message to be saved in the save file for bookkeeping."""
 
@@ -254,9 +275,24 @@ class manager:
         if i:
             self.mgrMsg = [sys.stdin.readline().strip()]
 
+    @lock
     def add_job(self, j: job, update: bool = False) -> None:
         """Adds a job to the manager. If the job already exists and `update` is
         `True`, it will be updated.
+
+        Arguments:
+            j (job): job to be added
+            update (bool, optional): whether to update the job if it already
+            exists. Defaults to False.
+        """
+        self._add_job(j, update)
+
+    def _add_job(self, j: job, update: bool = False) -> None:
+        """Adds a job to the manager. If the job already exists and `update` is
+        `True`, it will be updated.
+
+        As this can be called from `load` it does not lock the manager,
+        unlike the user interface `add_job`.
 
         Arguments:
             j (job): job to be added
@@ -278,7 +314,19 @@ class manager:
 
         self.jobs[j.name] = j
 
+    @lock
     def save(self, quiet: bool = False, prefix: str = "") -> None:
+        """Saves the current status of the jobs to a json file.
+
+        If `quiet` is `True`, it will not print any messages and
+        will not make a time-stamped copy of the save file.
+
+        Arguments:
+            quiet (bool, optional): whether to print messages. Defaults to False.
+        """
+        self._save(quiet, prefix)
+
+    def _save(self, quiet: bool = False, prefix: str = "") -> None:
         """Saves the current status of the jobs to a json file.
 
         If `quiet` is `True`, it will not print any messages and
@@ -346,6 +394,7 @@ class manager:
             log.debug(f"Removing old save file {fl}")
             os.remove(fl)
 
+    @lock
     def load(self, retryFailed: bool = False) -> None:
         """Loads the saved status of the jobs from a json file
         provided by the user.
@@ -354,7 +403,6 @@ class manager:
             retryFailed (bool, optional): whether to retry the failed jobs.
             Defaults to False.
         """
-        self.check_lock()
         log.info("Loading past status of jobs")
         with open(self.saveFileName, "rb") as f:
             depNames = {}
@@ -379,7 +427,7 @@ class manager:
                 j.load(jobDict)
 
                 # add it to the manager
-                self.add_job(j, update=True)
+                self._add_job(j, update=True)
 
                 # decorate the list of names of the dependencies
                 depNames[j.name] = jobDict["depNames"]
@@ -401,13 +449,13 @@ class manager:
             except KeyboardInterrupt:
                 log.error("Manager interrupted with keyboard!")
                 log.error("Saving and exitting ...")
-                self.save()
+                self._save()
                 self.print_failed()
                 sys.exit(0)
             except Exception:
                 log.error("Error ocurred when running manager!")
                 traceback.print_exc(file=sys.stdout)
-                self.save()
+                self._save()
                 self.print_failed()
                 sys.exit(1)
 
@@ -690,7 +738,7 @@ class manager:
             if run_command_local("tmux has-session -t falconry_remote" + self.dir):
                 log.info("Remote manager is already running")
             else:
-                self.submit_remote_job()
+                self._submit_remote_job()
                 sleep(5)  # give remote chance to start
 
         while True:
@@ -704,7 +752,7 @@ class manager:
             # most important for first event when first
             # batch of jobs is defined
             if event_counter % 30 == 0:
-                self.save()
+                self._save()
             event_counter += 1
 
             if self.mode == Mode.REMOTE:
@@ -759,7 +807,7 @@ class manager:
             self._print_summary(c)
             log.error(
                 "Remote manager is not running anymore! "
-                "Check falconry.remote.log in the manager "
+                f"Check {self.dir}/falconry.remote.log in the manager "
                 "directory for more info."
             )
             return False
@@ -776,7 +824,7 @@ class manager:
 
             # checking dependencies and submitting ready jobs
             self._check_dependence()
-            self.save(quiet=True)
+            self._save(quiet=True)
 
             # instead of sleeping wait for input
             log.info(
@@ -826,7 +874,7 @@ class manager:
             if var == "f":
                 self.print_failed()
             elif var == "s":
-                self.save()
+                self._save()
             elif var == "h":
                 log.info(
                     "|-Enter 'f' to show failed jobs, 'ff' to also show log paths----------|"
@@ -928,6 +976,7 @@ class manager:
         window.mainloop()
         log.info("MONITOR: FINISHED")
 
+    @lock
     def start(self, sleepTime: int = 60, gui: bool = False) -> None:
         """Starts the manager, iteratively checking status of jobs.
 
@@ -941,22 +990,22 @@ class manager:
                 GUI is experimental!
         """
         try:
-            self.check_lock()
-            with LockFile(self.lockFile):
-                if gui:
-                    self._start_gui(sleepTime)
-                else:
-                    self._start_cli(sleepTime)
+            if gui:
+                self._start_gui(sleepTime)
+            else:
+                self._start_cli(sleepTime)
         except KeyboardInterrupt:
             log.error("Manager interrupted with keyboard!")
             log.error("Saving and exitting ...")
-            self.save()
+            self._save()
             self.print_failed()
             sys.exit(0)
+        except LockFileException as e:
+            sys.exit(1)
         except Exception as e:
             log.error("Error ocurred when running manager!")
             log.error(str(e))
             traceback.print_exc(file=sys.stdout)
-            self.save()
+            self._save()
             self.print_failed()
-            sys.exit(1)
+            sys.exit(2)
