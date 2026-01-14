@@ -3,6 +3,7 @@ import os
 import logging
 import glob
 from copy import copy
+import time
 
 from typing import List, Dict, Any, Optional
 
@@ -148,7 +149,6 @@ class job:
 
         # if not empty, the job has been already submitted at least once
         if len(self.jobIDs) > 0:
-            self.htjob = htcondor.Submit(self.config)  # type: ignore
             self.jobID = self.jobIDs[-1]
 
             self.expand_files()
@@ -198,19 +198,24 @@ class job:
             else:
                 log.info("The job is %s, not submitting", status.name)
                 return
-        else:
-            # the htcondor version of the configuration
-            self.htjob = htcondor.Submit(self.config)  # type: ignore
+
+        # the htcondor version of the configuration
+        htjob = htcondor.Submit(self.config)  # type: ignore
 
         if doNotSubmit:
             return
 
         # Of course the submit has different capitalization here ...
-        submit_result = self.schedd.submit(self.htjob)
+        submit_result = self.schedd.submit(htjob)
         self.submit_done(f"{submit_result.cluster()}.0")
 
     def find_id(self) -> None:
-        """Finds the job ID based on the log file names."""
+        """Finds the job ID based on the log file names
+        and updates the job accordingly.
+
+        Only used with remote mode to synchronize jobs
+        between the local and remote client.
+        """
         # Find all log files
         if self.jobDir is None:
             raise RuntimeError(f'Job directory is not set for job {self.name}')
@@ -221,13 +226,20 @@ class job:
         for logFile in logFiles:
             jobid = os.path.basename(logFile).strip(".log")
             if jobid not in self.jobIDs:
-                tmp_copy = copy(self)
-                tmp_copy.jobID = jobid
-                timestamp = int(tmp_copy.get_info()["QDate"])
-                if self.jobTimeStamp is not None and (
-                    timestamp == -999 or timestamp < self.jobTimeStamp
-                ):
-                    continue
+                # If job id is smaller then the last one,
+                # it can mean that the numbers got reset,
+                # best to check timestamp
+                if len(self.jobIDs) > 0 and jobid < self.jobIDs[-1]:
+                    tmp_copy = copy(self)
+                    tmp_copy.jobID = jobid
+                    # This can be quite slow if job is old
+                    # (history is much slower than query)
+                    # TODO: take from log files?
+                    timestamp = int(tmp_copy.get_info()["QDate"])
+                    if self.jobTimeStamp is not None and (
+                        timestamp == -999 or timestamp < self.jobTimeStamp
+                    ):
+                        continue
                 self.submit_done(jobid)
 
     def submit_done(self, jobID: str) -> None:
@@ -240,7 +252,10 @@ class job:
             log.debug(f'Job {self.name} has already been submitted with id {jobID}')
             return
         self.jobID = jobID
-        self.jobTimeStamp = int(self.get_info()["QDate"])
+        self.jobTimeStamp = int(time.time())
+        # Following would be more precise but it can get really slow
+        # for old jobs - can this create issues?
+        # int(self.get_info()["QDate"])
         self.jobIDs.append(self.jobID)
         log.info(f"Job {self.name}: found id {self.jobID}")
         log.debug(self.config)
