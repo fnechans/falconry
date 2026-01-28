@@ -68,14 +68,15 @@ def config() -> argparse.ArgumentParser:
     parser.add_argument(
         '--remote',
         action='store_true',
-        help='Skips directly to loading and disables user interface, not generally recommended and mostly indended for internal use.',
+        help='Skips directly to loading and disables user interface, '
+        'not generally recommended and mostly indended for internal use.',
     )
     parser.add_argument(
         '--tmux',
         action='store_true',
         help='Submits separate session in tmux which is responsible for submitting '
-            'and monitoring jobs. Local instance only prints the status of jobs '
-            'and processes user input.',
+        'and monitoring jobs. Local instance only prints the status of jobs '
+        'and processes user input.',
     )
     return parser
 
@@ -126,7 +127,9 @@ class Block:
         if name in self.commands:
             log.error(f'Block {name} already has command {self.commands[name]}')
             raise AttributeError
-        self.commands[name] = quick_job(name, command, mgr.schedd, mgr.dir + '/log', time, ncpu)
+        self.commands[name] = quick_job(
+            name, command, mgr.schedd, mgr.dir + '/log', time, ncpu
+        )
         mgr.add_job(self.commands[name])
         log.info(f'Added command `{command}` to falconry')
 
@@ -185,6 +188,7 @@ def process_commands(commands: str, mgr: manager, time: int, ncpu: int = 1) -> N
         current_block.add_command(command, mgr, time, ncpu)
     current_block.lock()
 
+
 def main() -> None:
     """Main function for `falconry`"""
 
@@ -195,15 +199,18 @@ def main() -> None:
     mode = Mode.NORMAL if not cfg.tmux else Mode.LOCAL
     if cfg.remote:
         mode = Mode.REMOTE
-    mgr = manager(condor_dir, mode=mode)  # the argument specifies where the job is saved
-
+    mgr = manager(
+        condor_dir, mode=mode
+    )  # the argument specifies where the job is saved
 
     if cfg.verbose:
         log.setLevel(logging.DEBUG)
         logging.getLogger('falconry').setLevel(logging.DEBUG)
 
     if cfg.remote:
-        log.addHandler(logging.FileHandler(os.path.join(condor_dir, 'falconry.remote.log')))
+        log.addHandler(
+            logging.FileHandler(os.path.join(condor_dir, 'falconry.remote.log'))
+        )
         mgr.load()
     else:
         # Check if to run previous instance
@@ -211,7 +218,7 @@ def main() -> None:
         status, var = mgr.check_savefile_status()
         log.addHandler(logging.FileHandler(os.path.join(condor_dir, 'falconry.log')))
 
-        if status == True:
+        if status is True:
             if var == "l":
                 load = True
         else:
