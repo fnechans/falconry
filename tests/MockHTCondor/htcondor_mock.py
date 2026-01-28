@@ -17,11 +17,11 @@ class MockSchedd:
         self.job_id_counter = 1
         self.log_files = {}  # Simulate log files per job
 
-    def submit(self, job_description, itemdata=[]):
+    def submit(self, job_description, itemdata=None):
         """Simulates the submission of a job."""
-        if itemdata == []:
+        if itemdata == [] or itemdata is None:
             itemdata = [None]
-        for i, proc in enumerate(itemdata):
+        for i, _ in enumerate(itemdata):
             job_id = f"{self.job_id_counter}.{i}"
 
             # Replace $(JobId) in the log file path

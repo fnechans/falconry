@@ -304,7 +304,7 @@ class job:
 
     def release(self) -> bool:
         """Releases held job"""
-        if self.jobID == None:
+        if self.jobID is None:
             return False
         self.schedd.act(
             htcondor.JobAction.Release, self.act_constraints  # type: ignore
@@ -314,7 +314,7 @@ class job:
 
     def remove(self) -> bool:
         """Removes the job from HTCondor"""
-        if self.jobID == None:
+        if self.jobID is None:
             return False
         self.schedd.act(htcondor.JobAction.Remove, self.act_constraints)  # type: ignore
         log.info("Removing job %s with id %s", self.name, self.jobID)
@@ -327,7 +327,7 @@ class job:
             Dict[str, Any]: dictionary containing job information
         """
         # check if job has an ID
-        if self.jobID == None:
+        if self.jobID is None:
             log.error("Trying to list info for a job which was not submitted")
             raise SystemError
 
@@ -385,7 +385,7 @@ class job:
             return FalconryStatus.SKIPPED
         elif self.done:
             return FalconryStatus.COMPLETE
-        elif self.jobID == None:  # job was not even submitted
+        elif self.jobID is None:  # job was not even submitted
             return FalconryStatus.NOT_SUBMITTED
         # Using exists here is crucial, it returns false for broken symlinks
         elif not os.path.exists(self.logFile):
@@ -457,13 +457,13 @@ class job:
                 return -status
         return 11  # no "Normal termination for Job terminated"
 
-    def set_custom(self, dict: Dict[str, str]) -> None:
+    def set_custom(self, config: Dict[str, str]) -> None:
         """Sets custom configuration for the job from a dictionary
 
         Arguments:
-            dict (Dict[str, str]): dictionary containing job configuration
+            config (Dict[str, str]): dictionary containing job configuration
         """
-        for key, item in dict.items():
+        for key, item in config.items():
             self.config[key] = item
 
     def set_time(self, runTime: int, useRequestRuntime: bool = False) -> None:

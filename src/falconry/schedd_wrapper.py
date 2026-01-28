@@ -1,10 +1,22 @@
 import htcondor2 as htcondor
 import logging
 import functools
-from typing import Callable, Any
+from typing import Callable, Any, Iterator
 import time
+import signal
+from contextlib import contextmanager
 
 log = logging.getLogger('falconry')
+
+
+@contextmanager
+def ignore_sigint() -> Iterator[None]:
+    """Temporarily ignore SIGINT (Ctrl+C) during critical C extension calls."""
+    old_handler = signal.signal(signal.SIGINT, signal.SIG_IGN)
+    try:
+        yield
+    finally:
+        signal.signal(signal.SIGINT, old_handler)
 
 
 # Here the typing did not work properly ...
@@ -14,7 +26,11 @@ def schedd_check(func: Callable[["ScheddWrapper"], Any]) -> Any:
         self: "ScheddWrapper", *args: Any, **kwargs: Any
     ) -> Callable[["ScheddWrapper"], Any]:
         try:
-            return func(self, *args, **kwargs)
+            # Since htcondor 25 I see segfaults on SIGINT when calling
+            # htcondor function and dont have the time to trace an report
+            # so for now we are postponing SIGINT until the function returns
+            with ignore_sigint():
+                return func(self, *args, **kwargs)
         except htcondor.HTCondorException as e:
             log.warning(
                 "Possible problem with scheduler, waiting a bit and reloading schedd ..."

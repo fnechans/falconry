@@ -5,7 +5,15 @@ import logging
 
 log = logging.getLogger('falconry')
 
-def quick_job(name: str, command: str, schedd: ScheddWrapper, logDir: str, time: int, ncpu: int = 1) -> job:
+
+def quick_job(
+    name: str,
+    command: str,
+    schedd: ScheddWrapper,
+    logDir: str,
+    time: int,
+    ncpu: int = 1,
+) -> job:
     """Create job for given command.
 
     Arguments:
