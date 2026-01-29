@@ -107,11 +107,16 @@ class manager:
         if not os.path.exists(mgrDir):
             os.makedirs(mgrDir)
         self.dir = mgrDir
-        self.saveFileName = self.dir + "/data.json"
-        self.lockFile = self.dir + "/lock"
         if mode == Mode.REMOTE:
-            self.saveFileName = self.dir + "/remote.data.json"
-            self.lockFile = self.dir + "/remote.lock"
+            self.saveFileName = os.path.join(self.dir, 'remote.data.json')
+            self.lockFile = os.path.join(self.dir, 'remote.lock')
+            log.addHandler(
+                logging.FileHandler(os.path.join(self.dir, 'falconry.remote.log'))
+            )
+        else:
+            self.saveFileName = os.path.join(self.dir, 'data.json')
+            self.lockFile = os.path.join(self.dir, 'lock')
+            log.addHandler(logging.FileHandler(os.path.join(self.dir, 'falconry.log')))
 
         try:
             self._check_lock()
