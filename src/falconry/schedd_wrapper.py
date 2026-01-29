@@ -3,6 +3,7 @@ import logging
 import functools
 from typing import Callable, Any
 import time
+from .postpone_signal import postpone_signal
 
 log = logging.getLogger('falconry')
 
@@ -14,7 +15,11 @@ def schedd_check(func: Callable[["ScheddWrapper"], Any]) -> Any:
         self: "ScheddWrapper", *args: Any, **kwargs: Any
     ) -> Callable[["ScheddWrapper"], Any]:
         try:
-            return func(self, *args, **kwargs)
+            # Since htcondor 25 I see segfaults on SIGINT when calling
+            # htcondor function and dont have the time to trace an report
+            # so for now we are postponing SIGINT until the function returns
+            with postpone_signal():
+                return func(self, *args, **kwargs)
         except htcondor.HTCondorException as e:
             log.warning(
                 "Possible problem with scheduler, waiting a bit and reloading schedd ..."
