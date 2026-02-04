@@ -30,19 +30,22 @@ def postpone_signal() -> Iterator[None]:
     After exiting, re-raise error.
     """
     old_handlers = {}
-    for sig, exc in _mapping.items():
+    flag_triggered = {}
+    for sig, _ in _mapping.items():
         old_handlers[sig] = signal.getsignal(sig)
+        flag_triggered[sig] = False
 
         def _record_interrupt(
-            signum: Any, frame: Any, _sig: Any = sig, _exc: type[BaseException] = exc
+            signum: Any, frame: Any, _sig: Any = sig
         ) -> None:
-            signal.signal(_sig, old_handlers[_sig])
-            raise _exc
+            flag_triggered[_sig] = True
 
         signal.signal(sig, _record_interrupt)
 
     try:
         yield
     finally:
-        for sig, _ in _mapping.items():
+        for sig, exc in _mapping.items():
             signal.signal(sig, old_handlers[sig])
+            if flag_triggered[sig]:
+                raise exc
