@@ -19,7 +19,7 @@ from .status import FalconryStatus
 from . import cli
 from .schedd_wrapper import ScheddWrapper
 from .mychdir import chdir
-from .utils import run_command_local, prepend
+from .utils import run_command_local, prepend, clean_dir
 
 log = logging.getLogger('falconry')
 
@@ -107,16 +107,18 @@ class manager:
         if not os.path.exists(mgrDir):
             os.makedirs(mgrDir)
         self.dir = mgrDir
+        self.logFile = os.path.join(self.dir, 'falconry.log')
+        self.logFileRemote = os.path.join(self.dir, 'falconry.remote.log')
         if mode == Mode.REMOTE:
             self.saveFileName = os.path.join(self.dir, 'remote.data.json')
             self.lockFile = os.path.join(self.dir, 'remote.lock')
-            log.addHandler(
-                logging.FileHandler(os.path.join(self.dir, 'falconry.remote.log'))
-            )
+            log.addHandler(logging.FileHandler(self.logFileRemote))
         else:
+            if mode == Mode.LOCAL:
+                self.lockFileRemote = os.path.join(self.dir, 'remote.lock')
             self.saveFileName = os.path.join(self.dir, 'data.json')
             self.lockFile = os.path.join(self.dir, 'lock')
-            log.addHandler(logging.FileHandler(os.path.join(self.dir, 'falconry.log')))
+            log.addHandler(logging.FileHandler(self.logFile))
 
         try:
             self._check_lock()
@@ -153,6 +155,21 @@ class manager:
             if not run_command_local(command):
                 raise Exception('Failed to start remote manager')
 
+    def _kill_remote_job(self) -> None:
+        """Kills the remote manager."""
+        if self.mode != Mode.LOCAL:
+            raise Exception("Manager is not in LOCAL mode")
+        if self._has_remote_job():
+            log.info("Killing remote manager")
+            run_command_local("tmux kill-session -t falconry_remote" + self.dir)
+            sleep(5)
+
+    def _has_remote_job(self) -> bool:
+        """Checks if the remote manager is running."""
+        if self.mode != Mode.LOCAL:
+            raise Exception("Manager is not in LOCAL mode")
+        return run_command_local("tmux has-session -t falconry_remote" + self.dir)
+
     def _check_lock(self) -> None:
         """Raises an exception if the lock file already exists.
 
@@ -164,6 +181,20 @@ class manager:
                 f"Delete {self.lockFile} to start a new instance if you think this is a mistake"
             )
             raise LockFileException
+
+    def _delete(self) -> None:
+        """Deletes the contents of the manager directory,
+        excluding the log files and the lock file.
+        Also kills the remote manager if it is running."""
+        self._kill_remote_job()
+        log.info("Deleting old manager directory %s" % self.dir)
+        try:
+            clean_dir(self.dir, set([self.logFile, self.logFileRemote, self.lockFile]))
+        except OSError as e:
+            log.info(f"Failed to delete {self.dir}. Contents:")
+            for f in os.listdir(self.dir):
+                log.info(f"  {f}")
+            raise e
 
     @lock
     def check_savefile_status(self) -> Tuple[bool, Optional[str]]:
@@ -187,21 +218,8 @@ class manager:
             # Simplify the output for user interface
             # both unknown/timeout have the same result
             if state == cli.InputState.SUCCESS:
-                if var == "n":
-                    if self.mode == Mode.LOCAL and run_command_local(
-                        "tmux has-session -t falconry_remote" + self.dir
-                    ):
-                        log.info("Killing remote manager")
-                        run_command_local(
-                            "tmux kill-session -t falconry_remote" + self.dir
-                        )
-                    log.info("Deleting old manager directory")
-                    shutil.rmtree(self.dir)
-                    os.makedirs(self.dir)
-                    # create lock file again as it was deleted ...
-                    # TODO: is there better way?
-                    with open(self.lockFile, "w") as f:
-                        f.write("")
+                if var == 'n':
+                    self._delete()
 
                 return True, var
             return False, var
@@ -690,7 +708,7 @@ class manager:
         if self.mode != Mode.LOCAL:
             self._submit_jobs()
         if self.mode == Mode.LOCAL:
-            if run_command_local("tmux has-session -t falconry_remote" + self.dir):
+            if self._has_remote_job() or os.path.exists(self.lockFileRemote):
                 log.info("Remote manager is already running")
             else:
                 self._submit_remote_job()
@@ -755,8 +773,10 @@ class manager:
             return False
 
         # If we expect remote, check if its still running now
-        if self.mode == Mode.LOCAL and not run_command_local(
-            "tmux has-session -t falconry_remote" + self.dir
+        if (
+            self.mode == Mode.LOCAL
+            and not self._has_remote_job()
+            and not os.path.exists(self.lockFileRemote)
         ):
             self._print_summary(c)
             log.error(
@@ -859,7 +879,7 @@ class manager:
         elif var == "quit":
             log.info("MONITOR: EXITING")
             if self.mode == Mode.LOCAL:
-                run_command_local("tmux kill-session -t falconry_remote" + self.dir)
+                self._kill_remote_job()
             return False
         elif var == "retry all":
             for j in self.jobs.values():

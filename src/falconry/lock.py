@@ -9,6 +9,12 @@ log = logging.getLogger('falconry')
 class LockFile:
     def __init__(self, path: str) -> None:
         self.path = path
+        if os.path.exists(self.path):
+            log.error("Manager instance is already running.")
+            log.debug(
+                f"Delete {self.path} to start a new instance if you think this is a mistake"
+            )
+            raise LockFileException
 
     def __enter__(self) -> None:
         log.debug(f"Locking {self.path}")
