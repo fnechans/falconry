@@ -20,7 +20,7 @@ from .status import FalconryStatus
 from . import cli
 from .schedd_wrapper import ScheddWrapper
 from .mychdir import chdir
-from .utils import run_command_local, prepend, clean_dir
+from .utils import run_command_local, prepend, clean_dir, tail_file
 
 log = logging.getLogger('falconry')
 
@@ -464,6 +464,8 @@ class manager:
                     log.info(f"log: {j.logFile}")
                     log.info(f"out: {j.outFile}")
                     log.info(f"err: {j.errFile}")
+                    log.info("Last 10 lines of error file:")
+                    print(tail_file(j.errFile, 10))
         # TODO: maybe separate failed and removed?
         log.info("Printing removed jobs:")
         for name, j in self.jobs.items():
@@ -473,6 +475,8 @@ class manager:
                     log.info(f"log: {j.logFile}")
                     log.info(f"out: {j.outFile}")
                     log.info(f"err: {j.errFile}")
+                    log.info("Last 10 lines of error file:")
+                    print(tail_file(j.errFile, 10))
 
     def _check_dependence(self) -> None:
         """Checks status of all jobs and their dependencies to determine
@@ -510,7 +514,7 @@ class manager:
 
                 break
 
-            if isReady:
+            if self.mode != Mode.LOCAL and isReady:
                 # Check if we did not reach maximum number of submitted jobs
                 if self.maxJobIdle != -1 and self.curJobIdle > self.maxJobIdle:
                     break  # break because it does not make sense to check any other jobs now
@@ -857,8 +861,7 @@ class manager:
             self.curJobIdle = c.idle
 
             # checking dependencies and submitting ready jobs
-            if self.mode != Mode.LOCAL:
-                self._check_dependence()
+            self._check_dependence()
             self._save(quiet=True)
 
             # instead of sleeping wait for input
