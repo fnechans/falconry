@@ -12,6 +12,7 @@ import htcondor2 as htcondor
 import copy
 from glob import glob
 from typing import Dict, Any, Tuple, Optional
+from textwrap import dedent
 
 from .lock import lock, LockFileException
 from .job import job
@@ -42,7 +43,7 @@ class Counter:
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, Counter):
-            return NotImplemented
+            raise NotImplementedError("Only Counter objects can be compared")
         return (
             self.waiting == other.waiting
             and self.notSub == other.notSub
@@ -708,7 +709,7 @@ class manager:
         if self.mode != Mode.LOCAL:
             self._submit_jobs()
         if self.mode == Mode.LOCAL:
-            if self._has_remote_job() or os.path.exists(self.lockFileRemote):
+            if self._check_if_remote_job_running():
                 log.info("Remote manager is already running")
             else:
                 self._submit_remote_job()
@@ -753,6 +754,47 @@ class manager:
             )
         )
 
+    def _check_if_remote_job_running(self) -> bool:
+        """Checks if the remote manager is running (or should be resubmitted).
+        The conditions are, in order:
+        1. there is no lock file -> resubmit
+        2. there is a lock file and a remote job -> running
+        3. there is no log file -> resubmit
+        4. the manager finished -> resubmit
+        4. there is a log file and the last message was more than 10 minutes ago -> resubmit
+
+        Returns:
+            bool: True if the remote manager is running
+        """
+        if not os.path.exists(self.lockFileRemote):
+            return False
+
+        if self._has_remote_job():
+            return True
+
+        if not os.path.exists(self.logFileRemote):
+            return False
+
+        with open(self.logFileRemote, "r") as f:
+            if 'MONITOR: FINISHED' in f.read():
+                # This should not happen if there is a lock file,
+                # so mostly sanity check
+                return False
+            # find date in form of 2026-02-27 10:35:43.311589
+            # use the latest occurence
+            import re
+
+            date = re.findall(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}", f.read())
+            if not date:
+                return False
+            # now compare to current time, if last message is more than 10 minutes ago, resubmit
+            last_message = datetime.datetime.strptime(date[-1], "%Y-%m-%d %H:%M:%S")
+            delta = datetime.datetime.now() - last_message
+            if delta > datetime.timedelta(minutes=10):
+                return False
+
+        return True
+
     def _single_check(self, c: Counter) -> bool:
         """Single check in the manager loop.
 
@@ -773,18 +815,36 @@ class manager:
             return False
 
         # If we expect remote, check if its still running now
-        if (
-            self.mode == Mode.LOCAL
-            and not self._has_remote_job()
-            and not os.path.exists(self.lockFileRemote)
-        ):
-            self._print_summary(c)
-            log.error(
-                "Remote manager is not running anymore! "
-                f"Check {self.dir}/falconry.remote.log in the manager "
-                "directory for more info."
+        if self.mode == Mode.LOCAL and not self._check_if_remote_job_running():
+            # Here we handle cases where our jobs are not finished
+            # (so above check fails) but the remote manager is not running,
+            # meaning it has probably crashed or there was other problem.
+            # This requires user intervantion, ideally they check the log file
+            # to figure out what happened...
+            message = dedent(
+                f"""
+            Remote manager does not seem to be running anymore!
+            Check {self.logFileRemote} in the manager
+            directory for more info. If you think this is a mistake,
+            you can resubmit the remote manager.
+            Do you want to resubmit the remote manager? (y/n)
+            """
             )
-            return False
+            state, var = cli.input_checker(
+                {
+                    'y': 'yes, resubmit the remote manager',
+                    'n': 'no, do not resubmit the remote manager',
+                },
+                message=message,
+            )
+            if not (state == cli.InputState.SUCCESS and var == 'y'):
+                self._print_summary(c)
+                log.error(
+                    "Remote manager not running anymore and no resubmission requested."
+                )
+                return False
+            os.remove(self.lockFileRemote)
+            self._submit_remote_job()
 
         # only printout if something changed:
         if c != cOld:
