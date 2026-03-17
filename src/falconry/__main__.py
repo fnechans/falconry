@@ -6,6 +6,7 @@ from .quick_job import quick_job
 from .schedd_wrapper import kerberos_auth
 import os
 import argparse
+import re
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s (%(name)s): %(message)s")
 log = logging.getLogger('falconry')
@@ -41,8 +42,10 @@ def config() -> argparse.ArgumentParser:
         'either be specified directly in the cli one can specify link to '
         'file with multiple commands. In cli, commands separated by ;, in file '
         'by a new line. Commands grouped together are assumed '
-        'to run in paralel, blocks separated by ll (cli) or empty line (file) '
-        'are assumed to depend on previous block of commands.',
+        'to run in paralel, blocks separated by ;; (cli) or empty line (file) '
+        'are assumed to depend on previous block of commands. One can also '
+        'define names for individual commands by prefixing them with their name '
+        'in square brackets, for example `[name] command.',
     )
     parser.add_argument(
         '--retry-failed',
@@ -68,14 +71,15 @@ def config() -> argparse.ArgumentParser:
     parser.add_argument(
         '--remote',
         action='store_true',
-        help='Skips directly to loading and disables user interface, not generally recommended and mostly indended for internal use.',
+        help='Skips directly to loading and disables user interface, '
+        'not generally recommended and mostly indended for internal use.',
     )
     parser.add_argument(
         '--tmux',
         action='store_true',
         help='Submits separate session in tmux which is responsible for submitting '
-            'and monitoring jobs. Local instance only prints the status of jobs '
-            'and processes user input.',
+        'and monitoring jobs. Local instance only prints the status of jobs '
+        'and processes user input.',
     )
     return parser
 
@@ -94,6 +98,30 @@ def get_name(command: str) -> str:
 
     # remove multiple _
     return '_'.join([x for x in command.split('_') if x != ''])
+
+
+def parse_job(line: str) -> tuple[str, str]:
+    """
+    Parse '[NAME] COMMAND' format.
+    Returns (name, command). Name is None if no brackets.
+
+    Arguments:
+        line (str): line to parse
+
+    Returns:
+        tuple[str | None, str]: (name, command)
+    """
+    pattern = r'^\[([^$$]+)\]\s*(.*)$'
+    match = re.match(pattern, line.strip())
+
+    if match:
+        command = match.group(2)
+        if command == '':
+            raise ValueError(f"No command found for {line}")
+        return match.group(1), match.group(2)
+
+    # No valid bracket syntax - entire line is command
+    return get_name(line), line.strip()
 
 
 class Block:
@@ -122,13 +150,15 @@ class Block:
         if self._lock:
             log.error('Cannot add commands to locked block')
             raise AttributeError
-        name = get_name(command)
+        name, command = parse_job(command)
         if name in self.commands:
             log.error(f'Block {name} already has command {self.commands[name]}')
             raise AttributeError
-        self.commands[name] = quick_job(name, command, mgr.schedd, mgr.dir + '/log', time, ncpu)
+        self.commands[name] = quick_job(
+            name, command, mgr.schedd, mgr.dir + '/log', time, ncpu
+        )
         mgr.add_job(self.commands[name])
-        log.info(f'Added command `{command}` to falconry')
+        log.info(f'Added command `{command}` to falconry under name `{name}`')
 
     def lock(self) -> None:
         """Lock block, no more commands can be added"""
@@ -185,6 +215,7 @@ def process_commands(commands: str, mgr: manager, time: int, ncpu: int = 1) -> N
         current_block.add_command(command, mgr, time, ncpu)
     current_block.lock()
 
+
 def main() -> None:
     """Main function for `falconry`"""
 
@@ -195,23 +226,22 @@ def main() -> None:
     mode = Mode.NORMAL if not cfg.tmux else Mode.LOCAL
     if cfg.remote:
         mode = Mode.REMOTE
-    mgr = manager(condor_dir, mode=mode)  # the argument specifies where the job is saved
-
+    mgr = manager(
+        condor_dir, mode=mode
+    )  # the argument specifies where the job is saved
 
     if cfg.verbose:
         log.setLevel(logging.DEBUG)
         logging.getLogger('falconry').setLevel(logging.DEBUG)
 
     if cfg.remote:
-        log.addHandler(logging.FileHandler(os.path.join(condor_dir, 'falconry.remote.log')))
         mgr.load()
     else:
         # Check if to run previous instance
         load = False
         status, var = mgr.check_savefile_status()
-        log.addHandler(logging.FileHandler(os.path.join(condor_dir, 'falconry.log')))
 
-        if status == True:
+        if status is True:
             if var == "l":
                 load = True
         else:

@@ -11,45 +11,18 @@ from time import sleep
 import htcondor2 as htcondor
 import copy
 from glob import glob
-import subprocess
-from typing import Any, Union, TypeVar, Callable, cast
-
-try:
-    from contextlib import chdir  # type: ignore
-except ImportError:
-    # Simple copy from python source for python <= 3.11
-    from contextlib import AbstractContextManager
-
-    class chdir(AbstractContextManager):  # type: ignore
-        """Non thread-safe context manager to change the current working directory."""
-
-        def __init__(self, path: str) -> None:
-            self.path = path
-            self._old_cwd: list[str] = []
-
-        def __enter__(self) -> None:
-            self._old_cwd.append(os.getcwd())
-            os.chdir(self.path)
-
-        def __exit__(self, *excinfo: Any) -> None:
-            os.chdir(self._old_cwd.pop())
-
-
 from typing import Dict, Any, Tuple, Optional
+from textwrap import dedent
 
+from .lock import lock, LockFileException
 from .job import job
 from .status import FalconryStatus
 from . import cli
 from .schedd_wrapper import ScheddWrapper
+from .mychdir import chdir
+from .utils import run_command_local, prepend, clean_dir, tail_file
 
 log = logging.getLogger('falconry')
-
-
-def run_command_local(command: str) -> bool:
-    """Runs a command locally, returns True on success, False on failure"""
-    log.debug(f'Running command: {command}')
-    result = subprocess.run(command.split(), stdout=subprocess.PIPE)
-    return result.returncode == 0
 
 
 class Counter:
@@ -70,7 +43,7 @@ class Counter:
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, Counter):
-            return NotImplemented
+            raise NotImplementedError("Only Counter objects can be compared")
         return (
             self.waiting == other.waiting
             and self.notSub == other.notSub
@@ -89,28 +62,6 @@ class Mode:
     LOCAL = 1
     REMOTE = 2
 
-
-class LockFile:
-    def __init__(self, path: str) -> None:
-        self.path = path
-
-    def __enter__(self) -> None:
-        with open(self.path, "w") as f:
-            f.write("")
-
-    def __exit__(self, *excinfo: Any) -> None:
-        os.remove(self.path)
-
-class LockFileException(Exception):
-    pass
-
-FuncT = TypeVar("FuncT", bound=Callable[..., Any])
-def lock(func: FuncT) -> FuncT:
-    def wrapper(*args: Any, **kwargs: Any) -> Any:
-        args[0]._check_lock()
-        with LockFile(args[0].lockFile):
-            return func(*args, **kwargs)
-    return cast(FuncT, wrapper)
 
 class manager:
     """Manager holds all jobs and periodically checks their status.
@@ -141,7 +92,7 @@ class manager:
         log.info("MONITOR: INIT")
 
         if mode != Mode.NORMAL:
-            log.warning(f"Manager in run experimental mode. Please report any issues.")
+            log.warning("Manager in run experimental mode. Please report any issues.")
 
         # Initialize the manager, maily getting the htcondor schedd
         if schedd is not None:
@@ -157,11 +108,18 @@ class manager:
         if not os.path.exists(mgrDir):
             os.makedirs(mgrDir)
         self.dir = mgrDir
-        self.saveFileName = self.dir + "/data.json"
-        self.lockFile = self.dir + "/lock"
+        self.logFile = os.path.join(self.dir, 'falconry.log')
+        self.logFileRemote = os.path.join(self.dir, 'falconry.remote.log')
         if mode == Mode.REMOTE:
-            self.saveFileName = self.dir + "/remote.data.json"
-            self.lockFile = self.dir + "/remote.lock"
+            self.saveFileName = os.path.join(self.dir, 'remote.data.json')
+            self.lockFile = os.path.join(self.dir, 'remote.lock')
+            log.addHandler(logging.FileHandler(self.logFileRemote))
+        else:
+            if mode == Mode.LOCAL:
+                self.lockFileRemote = os.path.join(self.dir, 'remote.lock')
+            self.saveFileName = os.path.join(self.dir, 'data.json')
+            self.lockFile = os.path.join(self.dir, 'lock')
+            log.addHandler(logging.FileHandler(self.logFile))
 
         try:
             self._check_lock()
@@ -188,11 +146,30 @@ class manager:
         # run tmux from within the `self.dir`
         # but then run falconry from the current directory
         # in case of e.g. relative paths
-        command = f'tmux -v new-session -c {os.getcwd()} -d -s falconry_remote{self.dir} falconry --remote --dir {self.dir} BLANK'
+        command = (
+            f'tmux -v new-session -c {os.getcwd()} '
+            f'-d -s falconry_remote{self.dir} falconry'
+            f' --remote --dir {self.dir} BLANK'
+        )
         # Run in dir so log files are in the right place
         with chdir(self.dir):
             if not run_command_local(command):
                 raise Exception('Failed to start remote manager')
+
+    def _kill_remote_job(self) -> None:
+        """Kills the remote manager."""
+        if self.mode != Mode.LOCAL:
+            raise Exception("Manager is not in LOCAL mode")
+        if self._has_remote_job():
+            log.info("Killing remote manager")
+            run_command_local("tmux kill-session -t falconry_remote" + self.dir)
+            sleep(5)
+
+    def _has_remote_job(self) -> bool:
+        """Checks if the remote manager is running."""
+        if self.mode != Mode.LOCAL:
+            raise Exception("Manager is not in LOCAL mode")
+        return run_command_local("tmux has-session -t falconry_remote" + self.dir)
 
     def _check_lock(self) -> None:
         """Raises an exception if the lock file already exists.
@@ -201,8 +178,24 @@ class manager:
         """
         if os.path.exists(self.lockFile):
             log.error(f"Manager instance is already running in {self.dir}")
-            log.debug(f"Delete {self.lockFile} to start a new instance if you think this is a mistake")
+            log.debug(
+                f"Delete {self.lockFile} to start a new instance if you think this is a mistake"
+            )
             raise LockFileException
+
+    def _delete(self) -> None:
+        """Deletes the contents of the manager directory,
+        excluding the log files and the lock file.
+        Also kills the remote manager if it is running."""
+        self._kill_remote_job()
+        log.info("Deleting old manager directory %s" % self.dir)
+        try:
+            clean_dir(self.dir, set([self.logFile, self.logFileRemote, self.lockFile]))
+        except OSError as e:
+            log.info(f"Failed to delete {self.dir}. Contents:")
+            for f in os.listdir(self.dir):
+                log.info(f"  {f}")
+            raise e
 
     @lock
     def check_savefile_status(self) -> Tuple[bool, Optional[str]]:
@@ -226,21 +219,8 @@ class manager:
             # Simplify the output for user interface
             # both unknown/timeout have the same result
             if state == cli.InputState.SUCCESS:
-                if var == "n":
-                    if self.mode == Mode.LOCAL and run_command_local(
-                        "tmux has-session -t falconry_remote" + self.dir
-                    ):
-                        log.info("Killing remote manager")
-                        run_command_local(
-                            "tmux kill-session -t falconry_remote" + self.dir
-                        )
-                    log.info("Deleting old manager directory")
-                    shutil.rmtree(self.dir)
-                    os.makedirs(self.dir)
-                    # create lock file again as it was deleted ...
-                    # TODO: is there better way?
-                    with open(self.lockFile, "w") as f:
-                        f.write("")
+                if var == 'n':
+                    self._delete()
 
                 return True, var
             return False, var
@@ -407,12 +387,6 @@ class manager:
         with open(self.saveFileName, "rb") as f:
             depNames = {}
 
-            def prepend(old: Union[str, list[str]], new: list[str]) -> list[str]:
-                if isinstance(old, list):
-                    return old + new
-                else:
-                    return [old] + new
-
             for name, jobDict in ijson.kvitems(f, ""):
                 if name in manager.reservedNames:
                     if name == "Message":
@@ -490,6 +464,8 @@ class manager:
                     log.info(f"log: {j.logFile}")
                     log.info(f"out: {j.outFile}")
                     log.info(f"err: {j.errFile}")
+                    log.info("Last 10 lines of error file:")
+                    print(tail_file(j.errFile, 10))
         # TODO: maybe separate failed and removed?
         log.info("Printing removed jobs:")
         for name, j in self.jobs.items():
@@ -499,6 +475,8 @@ class manager:
                     log.info(f"log: {j.logFile}")
                     log.info(f"out: {j.outFile}")
                     log.info(f"err: {j.errFile}")
+                    log.info("Last 10 lines of error file:")
+                    print(tail_file(j.errFile, 10))
 
     def _check_dependence(self) -> None:
         """Checks status of all jobs and their dependencies to determine
@@ -536,7 +514,7 @@ class manager:
 
                 break
 
-            if isReady:
+            if self.mode != Mode.LOCAL and isReady:
                 # Check if we did not reach maximum number of submitted jobs
                 if self.maxJobIdle != -1 and self.curJobIdle > self.maxJobIdle:
                     break  # break because it does not make sense to check any other jobs now
@@ -625,7 +603,7 @@ class manager:
             if self.mode != Mode.REMOTE:
                 print(clearLine, flush=True, end='')
 
-    def _count_job(self, c: Counter, j: job) -> None:
+    def _count_job(self, c: Counter, j: job) -> None:  # noqa: ignore=C901
         """Updates the counter object with the status of a single job.
         Also resubmits jobs which failed due to condor problems.
 
@@ -735,7 +713,7 @@ class manager:
         if self.mode != Mode.LOCAL:
             self._submit_jobs()
         if self.mode == Mode.LOCAL:
-            if run_command_local("tmux has-session -t falconry_remote" + self.dir):
+            if self._check_if_remote_job_running():
                 log.info("Remote manager is already running")
             else:
                 self._submit_remote_job()
@@ -745,8 +723,7 @@ class manager:
             if not self._single_check(c):
                 break
 
-            if self.mode != Mode.LOCAL:
-                self._submit_jobs()
+            self._submit_jobs()
 
             # save with timestamp every 30 events
             # most important for first event when first
@@ -781,6 +758,47 @@ class manager:
             )
         )
 
+    def _check_if_remote_job_running(self) -> bool:
+        """Checks if the remote manager is running (or should be resubmitted).
+        The conditions are, in order:
+        1. there is no lock file -> resubmit
+        2. there is a lock file and a remote job -> running
+        3. there is no log file -> resubmit
+        4. the manager finished -> resubmit
+        4. there is a log file and the last message was more than 10 minutes ago -> resubmit
+
+        Returns:
+            bool: True if the remote manager is running
+        """
+        if not os.path.exists(self.lockFileRemote):
+            return False
+
+        if self._has_remote_job():
+            return True
+
+        if not os.path.exists(self.logFileRemote):
+            return False
+
+        with open(self.logFileRemote, "r") as f:
+            if 'MONITOR: FINISHED' in f.read():
+                # This should not happen if there is a lock file,
+                # so mostly sanity check
+                return False
+            # find date in form of 2026-02-27 10:35:43.311589
+            # use the latest occurence
+            import re
+
+            date = re.findall(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}", f.read())
+            if not date:
+                return False
+            # now compare to current time, if last message is more than 10 minutes ago, resubmit
+            last_message = datetime.datetime.strptime(date[-1], "%Y-%m-%d %H:%M:%S")
+            delta = datetime.datetime.now() - last_message
+            if delta > datetime.timedelta(minutes=10):
+                return False
+
+        return True
+
     def _single_check(self, c: Counter) -> bool:
         """Single check in the manager loop.
 
@@ -801,16 +819,36 @@ class manager:
             return False
 
         # If we expect remote, check if its still running now
-        if self.mode == Mode.LOCAL and not run_command_local(
-            "tmux has-session -t falconry_remote" + self.dir
-        ):
-            self._print_summary(c)
-            log.error(
-                "Remote manager is not running anymore! "
-                f"Check {self.dir}/falconry.remote.log in the manager "
-                "directory for more info."
+        if self.mode == Mode.LOCAL and not self._check_if_remote_job_running():
+            # Here we handle cases where our jobs are not finished
+            # (so above check fails) but the remote manager is not running,
+            # meaning it has probably crashed or there was other problem.
+            # This requires user intervantion, ideally they check the log file
+            # to figure out what happened...
+            message = dedent(
+                f"""
+            Remote manager does not seem to be running anymore!
+            Check {self.logFileRemote} in the manager
+            directory for more info. If you think this is a mistake,
+            you can resubmit the remote manager.
+            Do you want to resubmit the remote manager? (y/n)
+            """
             )
-            return False
+            state, var = cli.input_checker(
+                {
+                    'y': 'yes, resubmit the remote manager',
+                    'n': 'no, do not resubmit the remote manager',
+                },
+                message=message,
+            )
+            if not (state == cli.InputState.SUCCESS and var == 'y'):
+                self._print_summary(c)
+                log.error(
+                    "Remote manager not running anymore and no resubmission requested."
+                )
+                return False
+            os.remove(self.lockFileRemote)
+            self._submit_remote_job()
 
         # only printout if something changed:
         if c != cOld:
@@ -833,7 +871,7 @@ class manager:
 
         return True
 
-    def _cli_interface(self, sleep_time: int = 60) -> bool:
+    def _cli_interface(self, sleep_time: int = 60) -> bool:  # noqa: ignore=C901
         """CLI interface for the manager.
 
         Possible commands:
@@ -870,43 +908,45 @@ class manager:
         )
         if state == cli.InputState.TIMEOUT:
             print('\r    \r', end='', flush=True)
-        elif state == cli.InputState.SUCCESS:
-            if var == "f":
-                self.print_failed()
-            elif var == "s":
-                self._save()
-            elif var == "h":
+        elif state != cli.InputState.SUCCESS:
+            return True
+
+        if var == "f":
+            self.print_failed()
+        elif var == "s":
+            self._save()
+        elif var == "h":
+            log.info(
+                "|-Enter 'f' to show failed jobs, 'ff' to also show log paths----------|"
+            )
+            log.info(
+                "|-Enter 'r' to show running jobs, 'rr' to also show log paths---------|"
+            )
+            log.info(
+                "|-Enter 'x' to exit, 's' to save or 'retry all' to retry all failed---|"
+            )
+            if self.mode == Mode.LOCAL:
                 log.info(
-                    "|-Enter 'f' to show failed jobs, 'ff' to also show log paths----------|"
+                    "|-Enter 'quit' to completely quit the manager, including remote--|"
                 )
-                log.info(
-                    "|-Enter 'r' to show running jobs, 'rr' to also show log paths---------|"
-                )
-                log.info(
-                    "|-Enter 'x' to exit, 's' to save or 'retry all' to retry all failed---|"
-                )
-                if self.mode == Mode.LOCAL:
-                    log.info(
-                        "|-Enter 'quit' to completely quit the manager, including remote--|"
-                    )
-                self._cli_interface(sleep_time)
-            elif var == "ff":
-                self.print_failed(True)
-            elif var == "r":
-                self.print_running()
-            elif var == "rr":
-                self.print_running(True)
-            elif var == "x":
-                log.info("MONITOR: EXITING")
-                return False
-            elif var == "quit":
-                log.info("MONITOR: EXITING")
-                if self.mode == Mode.LOCAL:
-                    run_command_local("tmux kill-session -t falconry_remote" + self.dir)
-                return False
-            elif var == "retry all":
-                for j in self.jobs.values():
-                    self._check_resubmit(j, True)
+            self._cli_interface(sleep_time)
+        elif var == "ff":
+            self.print_failed(True)
+        elif var == "r":
+            self.print_running()
+        elif var == "rr":
+            self.print_running(True)
+        elif var == "x":
+            log.info("MONITOR: EXITING")
+            return False
+        elif var == "quit":
+            log.info("MONITOR: EXITING")
+            if self.mode == Mode.LOCAL:
+                self._kill_remote_job()
+            return False
+        elif var == "retry all":
+            for j in self.jobs.values():
+                self._check_resubmit(j, True)
 
         return True
 
@@ -1000,7 +1040,7 @@ class manager:
             self._save()
             self.print_failed()
             sys.exit(0)
-        except LockFileException as e:
+        except LockFileException:
             sys.exit(1)
         except Exception as e:
             log.error("Error ocurred when running manager!")
