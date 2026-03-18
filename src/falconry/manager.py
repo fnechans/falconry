@@ -802,11 +802,6 @@ class manager:
             return False
 
         with open(self.logFileRemote, "r") as f:
-            if 'MONITOR: FINISHED' in f.read():
-                # This should not happen if there is a lock file,
-                # so mostly sanity check
-                log.debug("Check remote: manager finished. This should not happen")
-                return False
             # find date in form of 2026-02-27 10:35:43.311589
             # use the latest occurence
             import re
