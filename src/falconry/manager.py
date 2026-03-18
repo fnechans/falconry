@@ -190,7 +190,16 @@ class manager:
         self._kill_remote_job()
         log.info("Deleting old manager directory %s" % self.dir)
         try:
-            clean_dir(self.dir, set([self.logFile, self.logFileRemote, self.lockFile]))
+            clean_dir(
+                self.dir,
+                # basename of the log files since they are within the `self.dir`
+                set(
+                    [
+                        os.path.basename(f)
+                        for f in [self.logFile, self.logFileRemote, self.lockFile]
+                    ]
+                ),
+            )
         except OSError as e:
             log.info(f"Failed to delete {self.dir}. Contents:")
             for f in os.listdir(self.dir):
