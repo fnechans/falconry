@@ -47,7 +47,6 @@ class MockSchedd:
                 constraint = constraint.split("&&")[0].split("==")
 
                 def cnstr(job_id, job_info):
-                    print(constraint[1].strip().replace(")", ""))
                     return job_id.split(".")[0] == constraint[1].strip().replace(
                         ")", ""
                     )
