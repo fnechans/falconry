@@ -155,6 +155,12 @@ class manager:
         with chdir(self.dir):
             if not run_command_local(command):
                 raise Exception('Failed to start remote manager')
+        iterations = 0
+        while not self._check_if_remote_job_running():
+            sleep(5)
+            if iterations > 12:
+                raise Exception("Failed to start remote manager")
+            iterations += 1
 
     def _kill_remote_job(self) -> None:
         """Kills the remote manager."""
@@ -163,7 +169,13 @@ class manager:
         if self._has_remote_job():
             log.info("Killing remote manager")
             run_command_local("tmux kill-session -t falconry_remote" + self.dir)
-            sleep(5)
+            iterations = 0
+            while self._has_remote_job():
+                sleep(5)
+                if iterations > 12:
+                    raise Exception("Failed to kill remote manager")
+                iterations += 1
+
 
     def _has_remote_job(self) -> bool:
         """Checks if the remote manager is running."""
@@ -726,7 +738,6 @@ class manager:
                 log.info("Remote manager is already running")
             else:
                 self._submit_remote_job()
-                sleep(5)  # give remote chance to start
 
         while True:
             if not self._single_check(c):
@@ -780,18 +791,21 @@ class manager:
             bool: True if the remote manager is running
         """
         if not os.path.exists(self.lockFileRemote):
+            log.debug("Check remote: no lock file")
             return False
 
         if self._has_remote_job():
             return True
 
         if not os.path.exists(self.logFileRemote):
+            log.debug("Check remote: no log file")
             return False
 
         with open(self.logFileRemote, "r") as f:
             if 'MONITOR: FINISHED' in f.read():
                 # This should not happen if there is a lock file,
                 # so mostly sanity check
+                log.debug("Check remote: manager finished. This should not happen")
                 return False
             # find date in form of 2026-02-27 10:35:43.311589
             # use the latest occurence
@@ -799,11 +813,13 @@ class manager:
 
             date = re.findall(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}", f.read())
             if not date:
+                log.debug("Check remote: no date in log file")
                 return False
             # now compare to current time, if last message is more than 10 minutes ago, resubmit
             last_message = datetime.datetime.strptime(date[-1], "%Y-%m-%d %H:%M:%S")
             delta = datetime.datetime.now() - last_message
             if delta > datetime.timedelta(minutes=10):
+                log.debug("Check remote: last message more than 10 minutes ago")
                 return False
 
         return True
@@ -828,7 +844,10 @@ class manager:
             return False
 
         # If we expect remote, check if its still running now
-        if self.mode == Mode.LOCAL and not self._check_if_remote_job_running():
+        if (self.mode == Mode.LOCAL and not self._check_if_remote_job_running() and
+            # Try again after 10 seconds in case the remote manager was
+            # just between two locked states (e.g. between loading and running)
+            (sleep(10) or not self._check_if_remote_job_running())):
             # Here we handle cases where our jobs are not finished
             # (so above check fails) but the remote manager is not running,
             # meaning it has probably crashed or there was other problem.
