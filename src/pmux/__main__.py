@@ -5,7 +5,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Union
 import logging
 from falconry import chdir, cli, run_command_local
 from datetime import datetime
@@ -117,7 +117,9 @@ class DummyReturn:
         self.stderr = stderr
 
 
-def attach_to_session(job_id: str, node: Optional[str]) -> subprocess.CompletedProcess:
+def attach_to_session(
+    job_id: str, node: Optional[str]
+) -> Union[subprocess.CompletedProcess, DummyReturn]:
     """Attach to tmux session, optionally via SSH.
 
     Arguments:
