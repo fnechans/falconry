@@ -17,7 +17,9 @@ def run_command_local(command: List[str]) -> subprocess.CompletedProcess:
         subprocess.CompletedProcess: result of the command
     """
     log.debug(f'Running command: {" ".join(command)}')
-    return subprocess.run(command, stdout=subprocess.PIPE)
+    return subprocess.run(
+        command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+    )
 
 
 def prepend(old: Union[str, list[str]], new: list[str]) -> list[str]:

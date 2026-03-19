@@ -10,6 +10,7 @@ import logging
 from falconry import chdir, cli, run_command_local
 from datetime import datetime
 import re
+import pexpect
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s (%(name)s): %(message)s")
 log = logging.getLogger('persistmux')
@@ -109,6 +110,13 @@ def tmux_kill_session(job_id: str) -> subprocess.CompletedProcess:
     return run_command_local(["tmux", "kill-session", "-t", job_id])
 
 
+class DummyReturn:
+    def __init__(self, statuscode: int, stdout: str, stderr: str) -> None:
+        self.returncode = statuscode
+        self.stdout = stdout
+        self.stderr = stderr
+
+
 def attach_to_session(job_id: str, node: Optional[str]) -> subprocess.CompletedProcess:
     """Attach to tmux session, optionally via SSH.
 
@@ -121,7 +129,20 @@ def attach_to_session(job_id: str, node: Optional[str]) -> subprocess.CompletedP
     tmux_cmd = ["tmux", "attach", "-t", job_id]
     if node and node != os.uname().nodename:
         log.info(f"Connecting to {node} and attaching...")
-        return run_command_local(["ssh", "-t", node, f'{" ".join(tmux_cmd)}'])
+        # return subprocess.Popen(["ssh", "-tt", node, f'{" ".join(tmux_cmd)}'],
+        #                        stdout=subprocess.PIPE,
+        #                        stderr=subprocess.PIPE,
+        #                        stdin=subprocess.PIPE,
+        #                        text=True)
+        # return run_command_local(["ssh", "-tt", node, f'{" ".join(tmux_cmd)}', " < /dev/tty"])
+        child = pexpect.spawn(
+            f'ssh -tt {node} {" ".join(tmux_cmd)}',
+            encoding='utf-8',
+            codec_errors='replace',
+        )
+        child.expect(".*")
+        child.interact()
+        return DummyReturn(child.exitstatus, child.before, child.after)
     else:
         log.info("Attaching locally...")
         return run_command_local(tmux_cmd)
@@ -270,7 +291,7 @@ def main() -> None:
 
     log.info(f"Finished with an exit code of {result.returncode}")
     if result.returncode != 0:
-        log.error(f"Error: {result.stderr.decode()}")
+        log.error(f"Error: {result.stderr}")
 
     log.info(f"You can find the tmux log file at {get_logfile(args.job_id)}")
 
