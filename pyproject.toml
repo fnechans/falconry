@@ -38,7 +38,8 @@ only-include = [
 
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/falconry"]
+packages = ["src/falconry", "src/pmux"]
 
 [project.scripts]
 falconry = "falconry.__main__:main"
+pmux = "pmux.__main__:main"

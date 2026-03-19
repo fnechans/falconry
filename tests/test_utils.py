@@ -13,18 +13,18 @@ class TestRunCommandLocal:
     def test_success(self):
         with patch('subprocess.run') as mock_run:
             mock_run.return_value = MagicMock(returncode=0)
-            assert run_command_local("echo hello") is True
+            assert run_command_local(["echo", "hello"]).returncode is 0
             mock_run.assert_called_once()
 
     def test_failure(self):
         with patch('subprocess.run') as mock_run:
             mock_run.return_value = MagicMock(returncode=1)
-            assert run_command_local("false") is False
+            assert run_command_local(["false"]).returncode is 1
 
     def test_command_splitting(self):
         with patch('subprocess.run') as mock_run:
             mock_run.return_value = MagicMock(returncode=0)
-            run_command_local("ls -la /tmp")
+            run_command_local("ls -la /tmp".split())
             call_args = mock_run.call_args[0][0]
             assert call_args == ['ls', '-la', '/tmp']
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 import logging
-from .manager import manager, Mode
+from .manager import manager
 from .job import job
 from .quick_job import quick_job
 from .schedd_wrapper import kerberos_auth
@@ -67,19 +67,6 @@ def config() -> argparse.ArgumentParser:
         type=int,
         default=1,
         help='Number of cpus to request. Default is 1',
-    )
-    parser.add_argument(
-        '--remote',
-        action='store_true',
-        help='Skips directly to loading and disables user interface, '
-        'not generally recommended and mostly indended for internal use.',
-    )
-    parser.add_argument(
-        '--tmux',
-        action='store_true',
-        help='Submits separate session in tmux which is responsible for submitting '
-        'and monitoring jobs. Local instance only prints the status of jobs '
-        'and processes user input.',
     )
     return parser
 
@@ -223,38 +210,32 @@ def main() -> None:
     log.info('Setting up `falconry` to run your commands')
     cfg = config().parse_args()
     condor_dir = os.path.join(cfg.dir, cfg.subdir)
-    mode = Mode.NORMAL if not cfg.tmux else Mode.LOCAL
-    if cfg.remote:
-        mode = Mode.REMOTE
     mgr = manager(
-        condor_dir, mode=mode
+        condor_dir
     )  # the argument specifies where the job is saved
 
     if cfg.verbose:
         log.setLevel(logging.DEBUG)
         logging.getLogger('falconry').setLevel(logging.DEBUG)
 
-    if cfg.remote:
-        mgr.load()
+    # Check if to run previous instance
+    load = False
+    status, var = mgr.check_savefile_status()
+
+    if status is True:
+        if var == "l":
+            load = True
     else:
-        # Check if to run previous instance
-        load = False
-        status, var = mgr.check_savefile_status()
+        return
 
-        if status is True:
-            if var == "l":
-                load = True
-        else:
-            return
+    # Ask for message to be saved in the save file
+    # Alwayas good to have some documentation ...
+    mgr.ask_for_message()
 
-        # Ask for message to be saved in the save file
-        # Alwayas good to have some documentation ...
-        mgr.ask_for_message()
-
-        if load:
-            mgr.load(cfg.retry_failed)
-        else:
-            process_commands(cfg.commands, mgr, cfg.set_time, cfg.ncpu)
+    if load:
+        mgr.load(cfg.retry_failed)
+    else:
+        process_commands(cfg.commands, mgr, cfg.set_time, cfg.ncpu)
     if cfg.dry:
         return
     # start the manager

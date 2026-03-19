@@ -12,15 +12,13 @@ import htcondor2 as htcondor
 import copy
 from glob import glob
 from typing import Dict, Any, Tuple, Optional
-from textwrap import dedent
 
 from .lock import lock, LockFileException
 from .job import job
 from .status import FalconryStatus
 from . import cli
 from .schedd_wrapper import ScheddWrapper
-from .mychdir import chdir
-from .utils import run_command_local, prepend, clean_dir, tail_file
+from .utils import prepend, clean_dir, tail_file
 
 log = logging.getLogger('falconry')
 
@@ -57,12 +55,6 @@ class Counter:
         )
 
 
-class Mode:
-    NORMAL = 0
-    LOCAL = 1
-    REMOTE = 2
-
-
 class manager:
     """Manager holds all jobs and periodically checks their status.
 
@@ -87,12 +79,8 @@ class manager:
         maxJobIdle: int = -1,
         schedd: Optional[ScheddWrapper] = None,
         keepSaveFiles: int = 2,
-        mode: int = Mode.NORMAL,
     ):
         log.info("MONITOR: INIT")
-
-        if mode != Mode.NORMAL:
-            log.warning("Manager in run experimental mode. Please report any issues.")
 
         # Initialize the manager, maily getting the htcondor schedd
         if schedd is not None:
@@ -109,17 +97,9 @@ class manager:
             os.makedirs(mgrDir)
         self.dir = mgrDir
         self.logFile = os.path.join(self.dir, 'falconry.log')
-        self.logFileRemote = os.path.join(self.dir, 'falconry.remote.log')
-        if mode == Mode.REMOTE:
-            self.saveFileName = os.path.join(self.dir, 'remote.data.json')
-            self.lockFile = os.path.join(self.dir, 'remote.lock')
-            log.addHandler(logging.FileHandler(self.logFileRemote))
-        else:
-            if mode == Mode.LOCAL:
-                self.lockFileRemote = os.path.join(self.dir, 'remote.lock')
-            self.saveFileName = os.path.join(self.dir, 'data.json')
-            self.lockFile = os.path.join(self.dir, 'lock')
-            log.addHandler(logging.FileHandler(self.logFile))
+        self.saveFileName = os.path.join(self.dir, 'data.json')
+        self.lockFile = os.path.join(self.dir, 'lock')
+        log.addHandler(logging.FileHandler(self.logFile))
 
         try:
             self._check_lock()
@@ -134,42 +114,6 @@ class manager:
         self.maxJobIdle = maxJobIdle
         self.curJobIdle = 0
         self.keepSaveFiles = keepSaveFiles
-        self.mode = mode
-
-    def _submit_remote_job(self) -> None:
-        """Creates tmux session for remote manager."""
-        if self.mode != Mode.LOCAL:
-            raise Exception("Manager is not in LOCAL mode")
-        self._save(prefix='remote.')
-        log.info('Starting remote manager')
-        # To get log files in the right place, we
-        # run tmux from within the `self.dir`
-        # but then run falconry from the current directory
-        # in case of e.g. relative paths
-        command = (
-            f'tmux -v new-session -c {os.getcwd()} '
-            f'-d -s falconry_remote{self.dir} falconry'
-            f' --remote --dir {self.dir} BLANK'
-        )
-        # Run in dir so log files are in the right place
-        with chdir(self.dir):
-            if not run_command_local(command):
-                raise Exception('Failed to start remote manager')
-
-    def _kill_remote_job(self) -> None:
-        """Kills the remote manager."""
-        if self.mode != Mode.LOCAL:
-            raise Exception("Manager is not in LOCAL mode")
-        if self._has_remote_job():
-            log.info("Killing remote manager")
-            run_command_local("tmux kill-session -t falconry_remote" + self.dir)
-            sleep(5)
-
-    def _has_remote_job(self) -> bool:
-        """Checks if the remote manager is running."""
-        if self.mode != Mode.LOCAL:
-            raise Exception("Manager is not in LOCAL mode")
-        return run_command_local("tmux has-session -t falconry_remote" + self.dir)
 
     def _check_lock(self) -> None:
         """Raises an exception if the lock file already exists.
@@ -187,18 +131,12 @@ class manager:
         """Deletes the contents of the manager directory,
         excluding the log files and the lock file.
         Also kills the remote manager if it is running."""
-        self._kill_remote_job()
         log.info("Deleting old manager directory %s" % self.dir)
         try:
             clean_dir(
                 self.dir,
                 # basename of the log files since they are within the `self.dir`
-                set(
-                    [
-                        os.path.basename(f)
-                        for f in [self.logFile, self.logFileRemote, self.lockFile]
-                    ]
-                ),
+                set([os.path.basename(f) for f in [self.logFile, self.lockFile]]),
             )
         except OSError as e:
             log.info(f"Failed to delete {self.dir}. Contents:")
@@ -523,7 +461,7 @@ class manager:
 
                 break
 
-            if self.mode != Mode.LOCAL and isReady:
+            if isReady:
                 # Check if we did not reach maximum number of submitted jobs
                 if self.maxJobIdle != -1 and self.curJobIdle > self.maxJobIdle:
                     break  # break because it does not make sense to check any other jobs now
@@ -542,8 +480,6 @@ class manager:
         Returns:
             FalconryStatus: latest status of the job
         """
-        if self.mode != Mode.NORMAL:
-            j.find_id()
         status = j.get_status()
         log.debug("Job %s has status %s", j.name, status.name)
         if status is FalconryStatus.ABORTED_BY_USER:
@@ -601,16 +537,14 @@ class manager:
                 return text
             return text[: width - 1] + "…\r"
 
-        termWidth = shutil.get_terminal_size(fallback=(80, 24)).columns
-        clearLine = " " * termWidth + "\r"
+        # termWidth = shutil.get_terminal_size(fallback=(80, 24)).columns
+        # clearLine = " " * termWidth + "\r"
         for name, j in self.jobs.items():
-            if self.mode != Mode.REMOTE:
-                printStr = _fit_to_width(f"Checking {name}\r", termWidth)
-            if self.mode != Mode.REMOTE:
-                print(printStr, end='', flush=True)
+            # TODO: These printounts are fancy but not compatible with log files. Fix?
+            # printStr = _fit_to_width(f"Checking {name}\r", termWidth)
+            # print(printStr, end='', flush=True)
             self._count_job(counter, j)
-            if self.mode != Mode.REMOTE:
-                print(clearLine, flush=True, end='')
+            # print(clearLine, flush=True, end='')
 
     def _count_job(self, c: Counter, j: job) -> None:  # noqa: ignore=C901
         """Updates the counter object with the status of a single job.
@@ -620,9 +554,6 @@ class manager:
             c (counter): counter object to update
             j (job): job to check
         """
-        if self.mode != Mode.NORMAL:
-            j.find_id()
-
         # first check if job is not submitted, skipped or done
         if j.skipped:
             c.skipped += 1
@@ -635,10 +566,7 @@ class manager:
             return
 
         #  resubmit job which failed due to condor problems
-        if self.mode != Mode.LOCAL:
-            status = self._check_resubmit(j)
-        else:
-            status = j.get_status()
+        status = self._check_resubmit(j)
 
         if (
             status == FalconryStatus.NOT_SUBMITTED
@@ -719,14 +647,7 @@ class manager:
         c = Counter()
         event_counter = 0
 
-        if self.mode != Mode.LOCAL:
-            self._submit_jobs()
-        if self.mode == Mode.LOCAL:
-            if self._check_if_remote_job_running():
-                log.info("Remote manager is already running")
-            else:
-                self._submit_remote_job()
-                sleep(5)  # give remote chance to start
+        self._submit_jobs()
 
         while True:
             if not self._single_check(c):
@@ -741,9 +662,7 @@ class manager:
                 self._save()
             event_counter += 1
 
-            if self.mode == Mode.REMOTE:
-                sleep(sleep_time)
-            elif not self._cli_interface(sleep_time):
+            if not self._cli_interface(sleep_time):
                 break
 
         log.info("MONITOR: FINISHED")
@@ -767,47 +686,6 @@ class manager:
             )
         )
 
-    def _check_if_remote_job_running(self) -> bool:
-        """Checks if the remote manager is running (or should be resubmitted).
-        The conditions are, in order:
-        1. there is no lock file -> resubmit
-        2. there is a lock file and a remote job -> running
-        3. there is no log file -> resubmit
-        4. the manager finished -> resubmit
-        4. there is a log file and the last message was more than 10 minutes ago -> resubmit
-
-        Returns:
-            bool: True if the remote manager is running
-        """
-        if not os.path.exists(self.lockFileRemote):
-            return False
-
-        if self._has_remote_job():
-            return True
-
-        if not os.path.exists(self.logFileRemote):
-            return False
-
-        with open(self.logFileRemote, "r") as f:
-            if 'MONITOR: FINISHED' in f.read():
-                # This should not happen if there is a lock file,
-                # so mostly sanity check
-                return False
-            # find date in form of 2026-02-27 10:35:43.311589
-            # use the latest occurence
-            import re
-
-            date = re.findall(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}", f.read())
-            if not date:
-                return False
-            # now compare to current time, if last message is more than 10 minutes ago, resubmit
-            last_message = datetime.datetime.strptime(date[-1], "%Y-%m-%d %H:%M:%S")
-            delta = datetime.datetime.now() - last_message
-            if delta > datetime.timedelta(minutes=10):
-                return False
-
-        return True
-
     def _single_check(self, c: Counter) -> bool:
         """Single check in the manager loop.
 
@@ -826,38 +704,6 @@ class manager:
         if not (c.waiting + c.notSub + c.idle + c.run + c.held > 0):
             self._print_summary(c)
             return False
-
-        # If we expect remote, check if its still running now
-        if self.mode == Mode.LOCAL and not self._check_if_remote_job_running():
-            # Here we handle cases where our jobs are not finished
-            # (so above check fails) but the remote manager is not running,
-            # meaning it has probably crashed or there was other problem.
-            # This requires user intervantion, ideally they check the log file
-            # to figure out what happened...
-            message = dedent(
-                f"""
-            Remote manager does not seem to be running anymore!
-            Check {self.logFileRemote} in the manager
-            directory for more info. If you think this is a mistake,
-            you can resubmit the remote manager.
-            Do you want to resubmit the remote manager? (y/n)
-            """
-            )
-            state, var = cli.input_checker(
-                {
-                    'y': 'yes, resubmit the remote manager',
-                    'n': 'no, do not resubmit the remote manager',
-                },
-                message=message,
-            )
-            if not (state == cli.InputState.SUCCESS and var == 'y'):
-                self._print_summary(c)
-                log.error(
-                    "Remote manager not running anymore and no resubmission requested."
-                )
-                return False
-            os.remove(self.lockFileRemote)
-            self._submit_remote_job()
 
         # only printout if something changed:
         if c != cOld:
@@ -934,10 +780,6 @@ class manager:
             log.info(
                 "|-Enter 'x' to exit, 's' to save or 'retry all' to retry all failed---|"
             )
-            if self.mode == Mode.LOCAL:
-                log.info(
-                    "|-Enter 'quit' to completely quit the manager, including remote--|"
-                )
             self._cli_interface(sleep_time)
         elif var == "ff":
             self.print_failed(True)
@@ -950,8 +792,6 @@ class manager:
             return False
         elif var == "quit":
             log.info("MONITOR: EXITING")
-            if self.mode == Mode.LOCAL:
-                self._kill_remote_job()
             return False
         elif var == "retry all":
             for j in self.jobs.values():
