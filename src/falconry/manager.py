@@ -539,7 +539,7 @@ class manager:
 
         # termWidth = shutil.get_terminal_size(fallback=(80, 24)).columns
         # clearLine = " " * termWidth + "\r"
-        for name, j in self.jobs.items():
+        for _name, j in self.jobs.items():
             # TODO: These printounts are fancy but not compatible with log files. Fix?
             # printStr = _fit_to_width(f"Checking {name}\r", termWidth)
             # print(printStr, end='', flush=True)

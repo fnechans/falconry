@@ -11,6 +11,7 @@ from falconry import chdir, cli, run_command_local
 from datetime import datetime
 import re
 import pexpect
+from textwrap import dedent
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s (%(name)s): %(message)s")
 log = logging.getLogger('persistmux')
@@ -21,7 +22,9 @@ LOGFILE_DIR = Path('.persistmux').resolve()
 
 
 def get_hostfile(job_id: str) -> Path:
-    f"""Return path to job's hostfile as {HOSTFILE_DIR}/{job_id}.host
+    """Return path to job's hostfile as `{HOSTFILE_DIR}/{job_id}.host`
+    HOSTFILE_DIR defaults to `~/.local/share/persistmux/`.
+    Hostfile contains the address of the node where the tmux session is running.
 
     Arguments:
         job_id (str): job id
@@ -73,7 +76,8 @@ def write_hostfile(job_id: str, node: str) -> None:
 
 
 def get_logfile(job_id: str) -> Path:
-    f"""Return path to job's logfile as {LOGFILE_DIR}/{job_id}.log
+    """Return path to job's logfile as `{LOGFILE_DIR}/{job_id}.log`.
+    LOGFILE_DIR defaults to `.persistmux` in the current working directory.
     Logfile contains stdout and stderr from the tmux session
 
     Arguments:
@@ -183,7 +187,7 @@ def start_session(
     # Write hostfile
     write_hostfile(job_id, node)
 
-    # TODO: This dones not work ...
+    # TODO: This does not work ...
     # cmd = ["tmux", "set-hook", "-t", job_id, "session-closed",
     #        f'run-shell "rm {get_hostfile(job_id)}; echo Job test cleaned up"']
     # cmd = ["tmux", "set-hook", "-t", job_id, "client-detached", f'display-message "Job {job_id} cleaned up"']
@@ -208,7 +212,8 @@ def start_session(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description=f"""pmux: Persistent tmux job tracker across cluster nodes.
+        description=dedent(f"""
+        pmux: Persistent tmux job tracker across cluster nodes.
 
         Based on the provided job id, pmux will either start a new session
         locally or attach to an existing one, optionally via SSH.
@@ -221,8 +226,14 @@ def main() -> None:
         avoid capturing pmux's own arguments. If your command
         requires quotes, you need to escape them (or use '"XYZ"').
 
-        If you are on lxplus
-        """
+        Example:
+
+            pmux test -- falconry -s test '"echo first job; echo second job"'
+
+        If you are on lxplus make sure you have persistent tmux
+        enabled:
+        https://cern.service-now.com/service-portal?id=kb_article&n=KB0008111
+        """), formatter_class=argparse.RawTextHelpFormatter
     )
     parser.add_argument(
         "-f",

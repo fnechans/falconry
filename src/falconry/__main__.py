@@ -57,7 +57,7 @@ def config() -> argparse.ArgumentParser:
         '-t',
         type=int,
         default=3 * 60 * 60,
-        help='Set time limit for jobs',
+        help='Set time limit for jobs in seconds. Default is 3 hours.',
     )
     parser.add_argument(
         '-v', '--verbose', help='Print extra info.', default=False, action='store_true'
