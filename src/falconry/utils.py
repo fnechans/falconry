@@ -1,4 +1,4 @@
-from typing import Union
+from typing import Union, List
 import os
 import subprocess
 import logging
@@ -8,17 +8,18 @@ from pathlib import Path
 log = logging.getLogger('falconry')
 
 
-def run_command_local(command: str) -> bool:
+def run_command_local(command: List[str]) -> subprocess.CompletedProcess:
     """Runs a command locally, returns True on success, False on failure.
 
     Arguments:
         command (str): command to run
     Returns:
-        bool: True on success, False on failure
+        subprocess.CompletedProcess: result of the command
     """
-    log.debug(f'Running command: {command}')
-    result = subprocess.run(command.split(), stdout=subprocess.PIPE)
-    return result.returncode == 0
+    log.debug(f'Running command: {" ".join(command)}')
+    return subprocess.run(
+        command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+    )
 
 
 def prepend(old: Union[str, list[str]], new: list[str]) -> list[str]:
