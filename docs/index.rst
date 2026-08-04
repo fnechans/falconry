@@ -10,6 +10,8 @@ HTCondor is powerful tool for management of jobs on computation clusters. It, an
 
 The goal of falconry is to have a lightweight wrapper around the HTCondor python API to run jobs. In addition, it offers a manager, which automatically submits and controls jobs, and is able to handle dependent jobs. This way one can submit large number of inter-connected jobs without having to manually run or check anything.
 
+Falconry also includes **pmux** (Persistent tmux), a tool for managing persistent tmux sessions across cluster nodes, allowing you to start sessions with commands and reattach to them later, even on remote nodes via SSH.
+
 Falconry is running on python 3 and can be found on `GitHub <https://github.com/fnechans/falconry>`_.
 
 .. toctree::
@@ -19,5 +21,6 @@ Falconry is running on python 3 and can be found on `GitHub <https://github.com/
    usage/install
    usage/quickstart
    usage/executable
+   usage/pmux
    usage/job
    usage/manager
