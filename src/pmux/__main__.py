@@ -27,6 +27,7 @@ LOGFILE_DIR = ORIGINAL_CWD / ".persistmux"
 @dataclass
 class CommandResult:
     """Standardized return type for command execution."""
+
     returncode: int
     stdout: str
     stderr: str
@@ -90,7 +91,9 @@ def write_hostfile(job_id: str, node: str) -> None:
         ValueError: If node is invalid
     """
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", node):
-        raise ValueError(f"Invalid node value: {node}, must match [A-Za-z0-9][A-Za-z0-9._-]*")
+        raise ValueError(
+            f"Invalid node value: {node}, must match [A-Za-z0-9][A-Za-z0-9._-]*"
+        )
 
     hostfile = get_hostfile(job_id)
     with open(hostfile, "w") as f:
@@ -160,9 +163,7 @@ def cleanup_failed_start(job_id: str) -> None:
     cleanup_session(job_id)
 
 
-def attach_to_session(
-    job_id: str, node: Optional[str]
-) -> CommandResult:
+def attach_to_session(job_id: str, node: Optional[str]) -> CommandResult:
     """Attach to tmux session, optionally via SSH.
 
     Arguments:
@@ -179,7 +180,7 @@ def attach_to_session(
         if not tmux_has_session(job_id, node):
             log.error(f"Session {job_id} not found on {node}.")
             return CommandResult(1, "", f"Session {job_id} not found on {node}")
-        
+
         child = pexpect.spawn(
             "ssh",
             ["-tt", node, *tmux_cmd],
@@ -188,7 +189,9 @@ def attach_to_session(
         )
         child.expect(".*")
         child.interact()
-        stdout = child.before if isinstance(child.before, str) else str(child.before or "")
+        stdout = (
+            child.before if isinstance(child.before, str) else str(child.before or "")
+        )
         stderr = child.after if isinstance(child.after, str) else str(child.after or "")
         if child.exitstatus is not None:
             statuscode = child.exitstatus
@@ -249,12 +252,6 @@ def start_session(
             log.error(f"Failed to start tmux session: {result.stderr}")
             return False
 
-        # Set remain-on-exit off so session closes when shell exits
-        remain_on_exit_cmd = ["tmux", "set-option", "-t", job_id, "remain-on-exit", "off"]
-        result = run_command_local(remain_on_exit_cmd)
-        if result.returncode != 0:
-            log.warning(f"Failed to set remain-on-exit: {result.stderr}")
-
         session_opt_cmd = [
             "tmux",
             "set-option",
@@ -266,6 +263,23 @@ def start_session(
         result = run_command_local(session_opt_cmd)
         if result.returncode != 0:
             log.warning(f"Failed to set tmux session cleanup metadata: {result.stderr}")
+
+        # Set up tmux hook to clean up hostfile when session closes
+        show_hook_cmd = ["tmux", "show-hooks", "-g", "session-closed"]
+        result = run_command_local(show_hook_cmd)
+        if result.returncode != 0:
+            log.warning(f"Failed to check existing hooks: {result.stderr}")
+
+        hook_cmd = [
+            "tmux",
+            "set-hook",
+            "-ag",
+            "session-closed",
+            "rm -f #{session_options:@pmux_hostfile}",
+        ]
+        result = run_command_local(hook_cmd)
+        if result.returncode != 0:
+            log.warning(f"Failed to set tmux hook: {result.stderr}")
 
         send_cmd = ["tmux", "send-keys", "-t", job_id, wrapped_command, "C-m"]
         result = run_command_local(send_cmd)
@@ -287,6 +301,19 @@ def start_session(
             cleanup_failed_start(job_id)
             return False
 
+        # Set remain-on-exit off so session closes when shell exits
+        remain_on_exit_cmd = [
+            "tmux",
+            "set-option",
+            "-t",
+            job_id,
+            "remain-on-exit",
+            "off",
+        ]
+        result = run_command_local(remain_on_exit_cmd)
+        if result.returncode != 0:
+            log.warning(f"Failed to set remain-on-exit: {result.stderr}")
+
     # Write hostfile
     write_hostfile(job_id, node)
 
@@ -296,9 +323,85 @@ def start_session(
     return True
 
 
+def handle_lxplus_warning() -> None:
+    """Show lxplus persistent tmux warning and prompt user to disable it."""
+    log.warning(
+        "Since you are on lxplus, make sure you have persistent "
+        "tmux sessions enabled, see "
+        "https://cern.service-now.com/service-portal?id=kb_article&n=KB0008111."
+    )
+    status, var = cli.input_checker(
+        {'y': 'acknowledged, do not show again', 'n': 'please remind me again'},
+        message="Do you want to disable this warning?",
+    )
+    if status == cli.InputState.SUCCESS and var == 'y':
+        (HOSTFILE_DIR / '.lxplus_confirmed').touch()
+
+
+def handle_new_session(
+    args: argparse.Namespace, parser: argparse.ArgumentParser
+) -> None:
+    """Handle starting a new session and optionally attaching to it."""
+    command = " ".join(args.command)
+    if not command:
+        parser.error(
+            "command is required when starting a new session; "
+            "omit command only when attaching to an existing session"
+        )
+
+    if (
+        'cern.ch' in os.uname().nodename
+        and not (HOSTFILE_DIR / '.lxplus_confirmed').exists()
+    ):
+        handle_lxplus_warning()
+
+    if not start_session(args.job_id, command, args.verbose):
+        sys.exit(1)
+
+    if args.attach:
+        result = attach_to_session(args.job_id, os.uname().nodename)
+        log.info(f"Finished with an exit code of {result.returncode}")
+        if result.returncode != 0:
+            log.error(f"Error: {result.stderr}")
+        log.info(f"You can find the tmux log file at {get_logfile(args.job_id)}")
+        sys.exit(result.returncode)
+
+    log.info(f"Session {args.job_id} started successfully")
+    sys.exit(0)
+
+
+def handle_existing_session(args: argparse.Namespace) -> None:
+    """Handle attaching to an existing session or just showing info."""
+    # Auto-attach if no command provided
+    if not args.attach and not args.command:
+        args.attach = True
+
+    if not args.attach:
+        log.info(
+            f"Session {args.job_id} already exists "
+            f"(on {read_hostfile(args.job_id) or 'unknown node'}). "
+            "Use -a/--attach to attach."
+        )
+        log.info(f"You can find the tmux log file at {get_logfile(args.job_id)}")
+        sys.exit(0)
+
+    node = read_hostfile(args.job_id)
+    if not node:
+        log.info(f"Error: Hostfile exists but unreadable for {args.job_id}")
+        sys.exit(1)
+
+    result = attach_to_session(args.job_id, node)
+    log.info(f"Finished with an exit code of {result.returncode}")
+    if result.returncode != 0:
+        log.error(f"Error: {result.stderr}")
+    log.info(f"You can find the tmux log file at {get_logfile(args.job_id)}")
+    sys.exit(result.returncode)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description=dedent(f"""
+        description=dedent(
+            f"""
         pmux: Persistent tmux job tracker across cluster nodes.
 
         Based on the provided job id, pmux will either start a new session
@@ -317,11 +420,13 @@ def main() -> None:
             pmux test -- falconry -s test '"echo first job; echo second job"'
 
         Use -a/--attach to attach to an existing session.
-        
+
         If you are on lxplus make sure you have persistent tmux
         enabled:
         https://cern.service-now.com/service-portal?id=kb_article&n=KB0008111
-        """), formatter_class=argparse.RawTextHelpFormatter
+        """
+        ),
+        formatter_class=argparse.RawTextHelpFormatter,
     )
     parser.add_argument(
         "-f",
@@ -356,57 +461,10 @@ def main() -> None:
         cleanup_session(args.job_id)
         host_exists = False
 
-    command = " ".join(args.command)
-
-    if not host_exists:
-        if not command:
-            parser.error(
-                "command is required when starting a new session; "
-                "omit command only when attaching to an existing session"
-            )
-
-        if (
-            'cern.ch' in os.uname().nodename
-            and not (HOSTFILE_DIR / '.lxplus_confirmed').exists()
-        ):
-            log.warning(
-                "Since you are on lxplus, make sure you have persistent "
-                "tmux sessions enabled, see "
-                "https://cern.service-now.com/service-portal?id=kb_article&n=KB0008111."
-            )
-            status, var = cli.input_checker(
-                {'y': 'acknowledged, do not show again', 'n': 'please remind me again'},
-                message="Do you want to disable this warning?",
-            )
-            if status == cli.InputState.SUCCESS and var == 'y':
-                (HOSTFILE_DIR / '.lxplus_confirmed').touch()
-
-        if not start_session(args.job_id, command, args.verbose):
-            sys.exit(1)
-        
-        if args.attach:
-            result = attach_to_session(args.job_id, os.uname().nodename)
-            log.info(f"Finished with an exit code of {result.returncode}")
-            if result.returncode != 0:
-                log.error(f"Error: {result.stderr}")
-            log.info(f"You can find the tmux log file at {get_logfile(args.job_id)}")
-            sys.exit(result.returncode)
+    if host_exists:
+        handle_existing_session(args)
     else:
-        if not args.attach:
-            log.info(f"Session {args.job_id} already exists (on {read_hostfile(args.job_id) or 'unknown node'}). Use -a/--attach to attach.")
-            log.info(f"You can find the tmux log file at {get_logfile(args.job_id)}")
-            sys.exit(0)
-        
-        node = read_hostfile(args.job_id)
-        if not node:
-            log.info(f"Error: Hostfile exists but unreadable for {args.job_id}")
-            sys.exit(1)
-        result = attach_to_session(args.job_id, node)
-        log.info(f"Finished with an exit code of {result.returncode}")
-        if result.returncode != 0:
-            log.error(f"Error: {result.stderr}")
-        log.info(f"You can find the tmux log file at {get_logfile(args.job_id)}")
-        sys.exit(result.returncode)
+        handle_new_session(args, parser)
 
 
 if __name__ == "__main__":
