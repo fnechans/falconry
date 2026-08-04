@@ -152,15 +152,24 @@ def tmux_kill_session(job_id: str, node: Optional[str] = None) -> subprocess.Com
         return run_command_local(["tmux", "kill-session", "-t", job_id])
 
 
-def cleanup_session(job_id: str) -> None:
-    """Remove all artifacts for a job: tmux session, hostfile, and logfile."""
+def cleanup_session(job_id: str) -> bool:
+    """Remove all artifacts for a job: tmux session, hostfile, and logfile.
+
+    Returns:
+        bool: True if cleanup succeeded or no session existed, False if kill failed.
+    """
     node = read_hostfile(job_id)
-    if tmux_has_session(job_id, node):
+    session_exists = tmux_has_session(job_id, node)
+
+    if session_exists:
         result = tmux_kill_session(job_id, node)
         if result.returncode != 0:
-            log.warning(f"Failed to kill session {job_id} on {node or 'local'}: {result.stderr}")
+            log.error(f"Failed to kill session {job_id} on {node or 'local'}: {result.stderr}")
+            return False
+
     get_hostfile(job_id).unlink(missing_ok=True)
     get_logfile(job_id).unlink(missing_ok=True)
+    return True
 
 
 def cleanup_failed_start(job_id: str) -> None:
@@ -256,35 +265,6 @@ def start_session(
         if result.returncode != 0:
             log.error(f"Failed to start tmux session: {result.stderr}")
             return False
-
-        session_opt_cmd = [
-            "tmux",
-            "set-option",
-            "-t",
-            job_id,
-            "@pmux_hostfile",
-            str(get_hostfile(job_id)),
-        ]
-        result = run_command_local(session_opt_cmd)
-        if result.returncode != 0:
-            log.warning(f"Failed to set tmux session cleanup metadata: {result.stderr}")
-
-        # Set up tmux hook to clean up hostfile when session closes
-        show_hook_cmd = ["tmux", "show-hooks", "-g", "session-closed"]
-        result = run_command_local(show_hook_cmd)
-        if result.returncode != 0:
-            log.warning(f"Failed to check existing hooks: {result.stderr}")
-
-        hook_cmd = [
-            "tmux",
-            "set-hook",
-            "-ag",
-            "session-closed",
-            "rm -f #{session_options:@pmux_hostfile}",
-        ]
-        result = run_command_local(hook_cmd)
-        if result.returncode != 0:
-            log.warning(f"Failed to set tmux hook: {result.stderr}")
 
         send_cmd = ["tmux", "send-keys", "-t", job_id, wrapped_command, "C-m"]
         result = run_command_local(send_cmd)
@@ -393,7 +373,7 @@ def handle_existing_session(args: argparse.Namespace) -> None:
 
     node = read_hostfile(args.job_id)
     if not node:
-        log.info(f"Error: Hostfile exists but unreadable for {args.job_id}")
+        log.error(f"Hostfile exists but unreadable for {args.job_id}")
         sys.exit(1)
 
     result = attach_to_session(args.job_id, node)
@@ -464,7 +444,9 @@ def main() -> None:
     host_exists = os.path.exists(get_hostfile(args.job_id))
 
     if args.force_start:
-        cleanup_session(args.job_id)
+        if not cleanup_session(args.job_id):
+            log.error(f"Cannot force start {args.job_id}: failed to kill existing session")
+            sys.exit(1)
         host_exists = False
 
     if host_exists:

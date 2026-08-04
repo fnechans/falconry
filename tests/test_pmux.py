@@ -104,9 +104,14 @@ def test_attach_to_session_local_uses_terminal_subprocess(
     assert result.stderr == ""
 
 
-def test_start_session_sets_trap_and_cleanup_hook(
+def test_start_session_sets_trap(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ):
+    """Test that start_session sets up the shell trap for cleanup.
+    
+    Note: tmux hook-based cleanup was removed; cleanup is now handled by the
+    shell trap and explicit cleanup_session() calls.
+    """
     hostfile_dir = tmp_path / "hosts"
     logfile_dir = tmp_path / "logs"
     hostfile_dir.mkdir(parents=True)
@@ -134,25 +139,13 @@ def test_start_session_sets_trap_and_cleanup_hook(
 
     assert pmux_main.start_session("job1", "echo hello", verbose=False) is True
 
-    assert len(calls) >= 6
+    assert len(calls) >= 4
     new_session_cmd = calls[0]
-    session_opt_cmd = calls[1]
-    show_hook_cmd = calls[2]
-    hook_cmd = calls[3]
-    send_keys_cmd = calls[4]
-    pipe_cmd = calls[5]
+    send_keys_cmd = calls[1]
+    pipe_cmd = calls[2]
+    remain_on_exit_cmd = calls[3]
 
     assert new_session_cmd[:3] == ["tmux", "new-session", "-d"]
-
-    assert session_opt_cmd[:4] == ["tmux", "set-option", "-t", "job1"]
-    assert session_opt_cmd[4] == "@pmux_hostfile"
-    assert session_opt_cmd[5].endswith("job1.host")
-
-    assert show_hook_cmd == ["tmux", "show-hooks", "-g", "session-closed"]
-
-    assert hook_cmd[:3] == ["tmux", "set-hook", "-ag"]
-    assert hook_cmd[3] == "session-closed"
-    assert "@pmux_hostfile" in hook_cmd[4]
 
     assert send_keys_cmd[:4] == ["tmux", "send-keys", "-t", "job1"]
     assert "trap" in send_keys_cmd[4]
@@ -163,6 +156,10 @@ def test_start_session_sets_trap_and_cleanup_hook(
 
     assert pipe_cmd[:4] == ["tmux", "pipe-pane", "-t", "job1"]
     assert str(logfile_dir / "job1.log") in pipe_cmd[4]
+    
+    assert remain_on_exit_cmd[:4] == ["tmux", "set-option", "-t", "job1"]
+    assert remain_on_exit_cmd[4] == "remain-on-exit"
+    assert remain_on_exit_cmd[5] == "off"
 
 
 def test_start_session_cleans_up_when_send_keys_fails(

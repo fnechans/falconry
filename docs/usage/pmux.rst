@@ -5,18 +5,19 @@ pmux
 ====
 
 pmux (Persistent tmux) is a tool for managing persistent tmux sessions across cluster nodes.
-It allows you to start a tmux session on a local or remote node, detach from it, and later reattach
-to the same session. This is particularly useful for running long-running processes on cluster nodes
-where you want to maintain the session even after disconnecting.
+It allows you to start a tmux session on the current node, detach from it, and later reattach
+to the same session from any machine (local or remote via SSH). This is particularly useful for 
+running long-running processes on cluster nodes where you want to maintain the session 
+even after disconnecting.
 
 Features
 --------
 
 - Start new tmux sessions with custom commands
 - Attach to existing sessions locally or via SSH
-- Automatic cleanup of hostfiles when sessions are closed
+- Automatic cleanup of hostfiles when sessions close normally (via shell trap)
 - Logging of session output to log files
-- Support for force-restarting sessions
+- Support for force-restarting sessions (requires successful cleanup of existing session)
 
 Installation
 ------------
@@ -53,7 +54,8 @@ By default, pmux stores hostfiles (which track where sessions are running) in:
 
     ~/.local/share/persistmux/
 
-This can be customized by modifying the ``HOSTFILE_DIR`` variable in the source code.
+This directory can be customized by modifying the ``HOSTFILE_DIR`` variable in the source code 
+(there is currently no environment variable or config file option).
 
 Logfile Directory
 ~~~~~~~~~~~~~~~~
@@ -86,7 +88,9 @@ Attaching to an existing session:
 
 This will attach to the existing ``myjob`` session.
 
-Starting a session on a specific node:
+Starting a session and attaching from another machine:
+
+First, start a session on your current node:
 
 .. code-block:: bash
 
@@ -98,8 +102,8 @@ Then from another machine or terminal:
 
     $ pmux -a myjob
 
-pmux will automatically detect that the session is running on a different node
-and connect via SSH.
+pmux will automatically read the hostfile to detect which node the session is running on
+and connect via SSH if needed.
 
 Force restarting a session:
 
@@ -107,7 +111,8 @@ Force restarting a session:
 
     $ pmux -f myjob -- new_command
 
-This will kill any existing session named ``myjob`` and start a new one.
+This will kill any existing session named ``myjob`` (if accessible) and start a new one.
+If the existing session cannot be killed, the command will fail with an error.
 
 Verbose mode:
 
@@ -139,9 +144,10 @@ How It Works
    - If the session is on a remote node, it connects via SSH and then attaches
 
 3. Cleanup:
-   - When a tmux session is closed (manually or by the command finishing),
-     pmux automatically removes the hostfile
-   - If a session doesn't exist but the hostfile does, pmux removes the stale hostfile
+   - When a tmux session closes normally, a shell trap automatically removes the hostfile
+   - When a session doesn't exist but the hostfile does, pmux removes the stale hostfile
+   - If automatic cleanup fails (e.g., session killed abruptly), use ``pmux -f <job_id>`` 
+     to force cleanup, or manually remove the hostfile
 
 LXPlus Considerations
 --------------------
@@ -157,9 +163,9 @@ Requirements
 ------------
 
 - Python 3.9+
-- tmux 3.0+ (for hook support)
+- tmux
 - pexpect (for SSH connections)
-- SSH access to remote nodes (if using remote sessions)
+- SSH access to remote nodes (if attaching to sessions on other nodes)
 
 See Also
 --------
