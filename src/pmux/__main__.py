@@ -136,24 +136,29 @@ def tmux_has_session(job_id: str, node: Optional[str] = None) -> bool:
         return result.returncode == 0
 
 
-def tmux_kill_session(job_id: str) -> subprocess.CompletedProcess:
-    """Kill tmux session.
+def tmux_kill_session(job_id: str, node: Optional[str] = None) -> subprocess.CompletedProcess:
+    """Kill tmux session locally or on a remote node.
 
     Arguments:
         job_id (str): job id
+        node (Optional[str]): node to kill on, or None for local
     Returns:
         subprocess.CompletedProcess: result of the command
     """
-    log.warning(f"Killing session {job_id}")
-    return run_command_local(["tmux", "kill-session", "-t", job_id])
+    log.warning(f"Killing session {job_id}" + (f" on {node}" if node else " locally"))
+    if node and node != os.uname().nodename:
+        return run_command_local(["ssh", node, "tmux", "kill-session", "-t", job_id])
+    else:
+        return run_command_local(["tmux", "kill-session", "-t", job_id])
 
 
 def cleanup_session(job_id: str) -> None:
     """Remove all artifacts for a job: tmux session, hostfile, and logfile."""
-    if tmux_has_session(job_id):
-        result = tmux_kill_session(job_id)
+    node = read_hostfile(job_id)
+    if tmux_has_session(job_id, node):
+        result = tmux_kill_session(job_id, node)
         if result.returncode != 0:
-            log.warning(f"Failed to kill session {job_id}: {result.stderr}")
+            log.warning(f"Failed to kill session {job_id} on {node or 'local'}: {result.stderr}")
     get_hostfile(job_id).unlink(missing_ok=True)
     get_logfile(job_id).unlink(missing_ok=True)
 

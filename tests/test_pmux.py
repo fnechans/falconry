@@ -299,6 +299,7 @@ def test_command_parsing_with_remainder(
     assert "-f" in started["command"]
     assert "file.txt" in started["command"]
 
+
 def test_get_hostfile_validation():
     """Test that get_hostfile validates job_id format."""
     # Valid job IDs
