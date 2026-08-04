@@ -115,19 +115,36 @@ def get_logfile(job_id: str) -> Path:
     return LOGFILE_DIR / f"{job_id}.log"
 
 
-def tmux_has_session(job_id: str, node: Optional[str] = None) -> bool:
+def tmux_has_session(job_id: str, node: Optional[str] = None) -> Optional[bool]:
     """Check if tmux session exists locally or on a remote node.
 
     Arguments:
         job_id (str): job id
         node (Optional[str]): node to check on, or None for local
     Returns:
-        bool: True if session exists, False otherwise
+        Optional[bool]: True if session exists, False if it doesn't, None if check failed (e.g., SSH error)
     """
     if node and node != os.uname().nodename:
         result = run_command_local(
             ["ssh", node, "tmux", "has-session", "-t", job_id],
         )
+        if result.returncode != 0:
+            # When running `ssh node tmux has-session -t job_id`:
+            # - If SSH succeeds but session doesn't exist: tmux returns 1, stderr is empty or from tmux
+            # - If SSH fails: ssh returns non-zero (255 for connection refused, etc.),
+            #   stderr contains SSH error message (typically starts with "ssh:")
+            # Use stderr to distinguish: SSH writes diagnostic messages there
+            if result.stderr and "ssh:" in result.stderr.lower():
+                log.warning(
+                    f"SSH to {node} failed with exit code {result.returncode}: {result.stderr.strip()}"
+                )
+                return None
+            # Also treat high exit codes (>1) as SSH errors since tmux only returns 0 or 1
+            if result.returncode > 1:
+                log.warning(
+                    f"SSH to {node} failed with exit code {result.returncode}: {result.stderr.strip()}"
+                )
+                return None
         return result.returncode == 0
     else:
         result = run_command_local(
@@ -136,7 +153,9 @@ def tmux_has_session(job_id: str, node: Optional[str] = None) -> bool:
         return result.returncode == 0
 
 
-def tmux_kill_session(job_id: str, node: Optional[str] = None) -> subprocess.CompletedProcess:
+def tmux_kill_session(
+    job_id: str, node: Optional[str] = None
+) -> subprocess.CompletedProcess:
     """Kill tmux session locally or on a remote node.
 
     Arguments:
@@ -156,15 +175,25 @@ def cleanup_session(job_id: str) -> bool:
     """Remove all artifacts for a job: tmux session, hostfile, and logfile.
 
     Returns:
-        bool: True if cleanup succeeded or no session existed, False if kill failed.
+        bool: True if cleanup succeeded or no session existed, False if kill failed
+              or session check failed (e.g., SSH error).
     """
     node = read_hostfile(job_id)
     session_exists = tmux_has_session(job_id, node)
 
+    # If we couldn't determine session status (e.g., SSH failed), don't clean up
+    if session_exists is None:
+        log.error(
+            f"Cannot verify session {job_id} on {node} (SSH/connection error). Keeping hostfile."
+        )
+        return False
+
     if session_exists:
         result = tmux_kill_session(job_id, node)
         if result.returncode != 0:
-            log.error(f"Failed to kill session {job_id} on {node or 'local'}: {result.stderr}")
+            log.error(
+                f"Failed to kill session {job_id} on {node or 'local'}: {result.stderr}"
+            )
             return False
 
     get_hostfile(job_id).unlink(missing_ok=True)
@@ -191,7 +220,13 @@ def attach_to_session(job_id: str, node: Optional[str]) -> CommandResult:
     if node and node != local_node:
         log.info(f"Connecting to {node} and attaching...")
         # Check if session exists on remote node first
-        if not tmux_has_session(job_id, node):
+        session_exists = tmux_has_session(job_id, node)
+        if session_exists is None:
+            log.error(
+                f"Cannot verify session {job_id} on {node} (SSH/connection error)."
+            )
+            return CommandResult(1, "", f"Cannot connect to {node} to verify session")
+        if not session_exists:
             log.error(f"Session {job_id} not found on {node}.")
             return CommandResult(1, "", f"Session {job_id} not found on {node}")
 
@@ -216,7 +251,12 @@ def attach_to_session(job_id: str, node: Optional[str]) -> CommandResult:
         return CommandResult(statuscode, stdout, stderr)
     else:
         log.info("Attaching locally...")
-        if not tmux_has_session(job_id):
+        session_exists = tmux_has_session(job_id)
+        # For local check, session_exists should never be None, but handle it anyway
+        if session_exists is None:
+            log.error(f"Cannot verify local session {job_id}.")
+            return CommandResult(1, "", f"Cannot verify session {job_id}")
+        if not session_exists:
             log.error(f"Session {job_id} not found on {local_node}.")
             # remove stale hostfile if session does not exist anymore
             if get_hostfile(job_id).exists():
@@ -445,7 +485,9 @@ def main() -> None:
 
     if args.force_start:
         if not cleanup_session(args.job_id):
-            log.error(f"Cannot force start {args.job_id}: failed to kill existing session")
+            log.error(
+                f"Cannot force start {args.job_id}: failed to kill existing session"
+            )
             sys.exit(1)
         host_exists = False
 
