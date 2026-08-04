@@ -104,11 +104,9 @@ def test_attach_to_session_local_uses_terminal_subprocess(
     assert result.stderr == ""
 
 
-def test_start_session_sets_trap(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-):
+def test_start_session_sets_trap(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     """Test that start_session sets up the shell trap for cleanup.
-    
+
     Note: tmux hook-based cleanup was removed; cleanup is now handled by the
     shell trap and explicit cleanup_session() calls.
     """
@@ -156,7 +154,7 @@ def test_start_session_sets_trap(
 
     assert pipe_cmd[:4] == ["tmux", "pipe-pane", "-t", "job1"]
     assert str(logfile_dir / "job1.log") in pipe_cmd[4]
-    
+
     assert remain_on_exit_cmd[:4] == ["tmux", "set-option", "-t", "job1"]
     assert remain_on_exit_cmd[4] == "remain-on-exit"
     assert remain_on_exit_cmd[5] == "off"
