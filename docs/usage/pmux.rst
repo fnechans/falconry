@@ -82,7 +82,7 @@ Attaching to an existing session:
 
 .. code-block:: bash
 
-    $ pmux myjob
+    $ pmux -a myjob
 
 This will attach to the existing ``myjob`` session.
 
@@ -96,7 +96,7 @@ Then from another machine or terminal:
 
 .. code-block:: bash
 
-    $ pmux myjob
+    $ pmux -a myjob
 
 pmux will automatically detect that the session is running on a different node
 and connect via SSH.
@@ -131,9 +131,8 @@ How It Works
 1. When you start a session with pmux, it:
    - Creates a tmux session with your specified command
    - Writes a hostfile recording which node the session is on
-   - Sets up a tmux hook to clean up the hostfile when the session ends
+   - Sets up a shell trap in the tmux session to clean up the hostfile when the command exits
    - Pipes session output to a log file
-
 2. When you attach to an existing session:
    - pmux reads the hostfile to find which node the session is on
    - If the session is on the local node, it attaches directly

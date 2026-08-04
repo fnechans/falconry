@@ -268,11 +268,21 @@ def test_command_parsing_with_remainder(
         return FakeResult(returncode=0)
 
     monkeypatch.setattr(pmux_main, "run_command_local", fake_run_command_local)
-    monkeypatch.setattr(pmux_main, "start_session", lambda *args, **kwargs: True)
+
+    started = {"called": False, "job_id": None, "command": None, "verbose": None}
+
+    def fake_start_session(job_id: str, command: str, verbose: bool = False):
+        started["called"] = True
+        started["job_id"] = job_id
+        started["command"] = command
+        started["verbose"] = verbose
+        return True
+
+    monkeypatch.setattr(pmux_main, "start_session", fake_start_session)
     monkeypatch.setattr(
         pmux_main,
         "attach_to_session",
-        lambda *args, **kwargs: pmux_main.DummyReturn(0, "", ""),
+        lambda *args, **kwargs: pmux_main.CommandResult(0, "", ""),
     )
 
     # Test with command containing flags
@@ -284,7 +294,10 @@ def test_command_parsing_with_remainder(
         pmux_main.main()
 
     assert exc_info.value.code == 0
-
+    assert started["called"] is True
+    assert started["job_id"] == "job1"
+    assert "-f" in started["command"]
+    assert "file.txt" in started["command"]
 
 def test_get_hostfile_validation():
     """Test that get_hostfile validates job_id format."""

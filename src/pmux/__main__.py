@@ -208,7 +208,7 @@ def attach_to_session(job_id: str, node: Optional[str]) -> CommandResult:
             if get_hostfile(job_id).exists():
                 log.warning(f"Removing stale hostfile for {job_id}")
                 get_hostfile(job_id).unlink()
-            return CommandResult(1, "", "")
+            return CommandResult(1, "", f"Session {job_id} not found on {local_node}")
 
         result = subprocess.run(tmux_cmd)
         return CommandResult(result.returncode, "", "")
@@ -294,7 +294,8 @@ def start_session(
                 f"#\n# Session {job_id} started on {node} at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n#\n"
             )
 
-        pipe_cmd = ["tmux", "pipe-pane", "-t", job_id, f"cat >> {get_logfile(job_id)}"]
+        logfile_quoted = shlex.quote(str(get_logfile(job_id)))
+        pipe_cmd = ["tmux", "pipe-pane", "-t", job_id, f"cat >> {logfile_quoted}"]
         result = run_command_local(pipe_cmd)
         if result.returncode != 0:
             log.error(f"Failed to enable tmux logging: {result.stderr}")
