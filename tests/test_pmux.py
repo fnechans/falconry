@@ -104,7 +104,7 @@ def test_attach_to_session_local_uses_terminal_subprocess(
     assert result.stderr == ""
 
 
-def test_start_session_sets_trap(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+def test_start_session(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     """Test that start_session sends the command with exit.
 
     Note: Cleanup is now handled by explicit cleanup_session() calls.

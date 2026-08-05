@@ -85,10 +85,9 @@ def verify_session_or_return_error(
 
     if not session_exists:
         remove_hostfile(job_id)
-        log.warning(f"Session {job_id} not found on {node_desc}, cleaned up hostfile. "
-                    "You can now start a new session.")
         return CommandResult(
-            0, "", ""
+            1, "", f"Session {job_id} not found on {node_desc}, cleaned up hostfile. "
+            "You can now start a new session."
         )
 
     return None
@@ -470,8 +469,9 @@ def start_session(
     wrapped_command = f"{command}; exit"
 
     # Start session (inherits parent environment by default)
+    cwd = os.getcwd()
     with chdir(HOSTFILE_DIR):
-        if not setup_tmux_session(job_id, os.getcwd(), verbose):
+        if not setup_tmux_session(job_id, cwd, verbose):
             return False
 
         if not send_command_to_session(job_id, wrapped_command):
