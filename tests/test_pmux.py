@@ -1,0 +1,399 @@
+from pathlib import Path
+from contextlib import nullcontext
+
+import pytest
+
+from pmux import __main__ as pmux_main
+
+
+def test_main_allows_empty_command_for_existing_session(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    monkeypatch.setattr(pmux_main, "HOSTFILE_DIR", tmp_path)
+    monkeypatch.setattr(
+        pmux_main.os, "uname", lambda: type("U", (), {"nodename": "localnode"})()
+    )
+
+    # Pretend an existing hostfile/session mapping already exists.
+    (tmp_path / "job1.host").write_text("remote-node\n")
+
+    attached = {"called": False, "job_id": None, "node": None}
+
+    def fake_attach(job_id: str, node: str):
+        attached["called"] = True
+        attached["job_id"] = job_id
+        attached["node"] = node
+        return pmux_main.CommandResult(0, "", "")
+
+    monkeypatch.setattr(pmux_main, "attach_to_session", fake_attach)
+    monkeypatch.setattr(
+        pmux_main,
+        "start_session",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("start_session should not be called")
+        ),
+    )
+
+    monkeypatch.setattr(pmux_main.sys, "argv", ["pmux", "job1"])
+
+    with pytest.raises(SystemExit) as exc_info:
+        pmux_main.main()
+
+    assert exc_info.value.code == 0
+    assert attached["called"] is True
+    assert attached["job_id"] == "job1"
+    assert attached["node"] == "remote-node"
+
+
+def test_attach_to_session_nonzero_when_remote_exitstatus_missing(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr(
+        pmux_main.os, "uname", lambda: type("U", (), {"nodename": "localnode"})()
+    )
+    # Mock tmux_has_session to return True (session exists on remote)
+    monkeypatch.setattr(pmux_main, "tmux_has_session", lambda *args: True)
+
+    class FakeChild:
+        def __init__(self):
+            self.exitstatus = None
+            self.signalstatus = 15
+            self.before = "remote out"
+            self.after = "remote err"
+
+        def expect(self, _pattern: str):
+            return 0
+
+        def interact(self):
+            return None
+
+    monkeypatch.setattr(pmux_main.pexpect, "spawn", lambda *args, **kwargs: FakeChild())
+
+    result = pmux_main.attach_to_session("job1", "remote-node")
+
+    assert result.returncode == 143
+    assert result.stdout == "remote out"
+    assert result.stderr == "remote err"
+
+
+def test_attach_to_session_local_uses_terminal_subprocess(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr(
+        pmux_main.os, "uname", lambda: type("U", (), {"nodename": "localnode"})()
+    )
+    monkeypatch.setattr(pmux_main, "tmux_has_session", lambda _job_id, _node=None: True)
+
+    calls = []
+
+    class FakeCompletedProcess:
+        def __init__(self, returncode=0):
+            self.returncode = returncode
+
+    def fake_subprocess_run(command):
+        calls.append(command)
+        return FakeCompletedProcess(returncode=0)
+
+    monkeypatch.setattr(pmux_main.subprocess, "run", fake_subprocess_run)
+
+    result = pmux_main.attach_to_session("job1", "localnode")
+
+    assert calls == [["tmux", "attach", "-t", "job1"]]
+    assert result.returncode == 0
+    assert result.stdout == ""
+    assert result.stderr == ""
+
+
+def test_start_session(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    """Test that start_session sends the command with exit.
+
+    Note: Cleanup is now handled by explicit cleanup_session() calls.
+    The command is wrapped with '; exit' to ensure the session closes.
+    """
+    hostfile_dir = tmp_path / "hosts"
+    logfile_dir = tmp_path / "logs"
+    hostfile_dir.mkdir(parents=True)
+
+    monkeypatch.setattr(pmux_main, "HOSTFILE_DIR", hostfile_dir)
+    monkeypatch.setattr(pmux_main, "LOGFILE_DIR", logfile_dir)
+    monkeypatch.setattr(
+        pmux_main.os, "uname", lambda: type("U", (), {"nodename": "localnode"})()
+    )
+    monkeypatch.setattr(pmux_main, "chdir", lambda _path: nullcontext())
+
+    calls = []
+
+    class FakeResult:
+        def __init__(self, returncode=0, stdout="", stderr=""):
+            self.returncode = returncode
+            self.stdout = stdout
+            self.stderr = stderr
+
+    def fake_run_command_local(command):
+        calls.append(command)
+        return FakeResult(returncode=0)
+
+    monkeypatch.setattr(pmux_main, "run_command_local", fake_run_command_local)
+
+    assert pmux_main.start_session("job1", "echo hello", verbose=False) is True
+
+    assert len(calls) >= 4
+    new_session_cmd = calls[0]
+    send_keys_cmd = calls[1]
+    pipe_cmd = calls[2]
+    remain_on_exit_cmd = calls[3]
+
+    assert new_session_cmd[:3] == ["tmux", "new-session", "-d"]
+
+    assert send_keys_cmd[:4] == ["tmux", "send-keys", "-t", "job1"]
+    assert send_keys_cmd[4] == "echo hello; exit"
+    assert send_keys_cmd[5] == "C-m"
+
+    assert pipe_cmd[:4] == ["tmux", "pipe-pane", "-t", "job1"]
+    assert str(logfile_dir / "job1.log") in pipe_cmd[4]
+
+    assert remain_on_exit_cmd[:4] == ["tmux", "set-option", "-t", "job1"]
+    assert remain_on_exit_cmd[4] == "remain-on-exit"
+    assert remain_on_exit_cmd[5] == "off"
+
+
+def test_start_session_cleans_up_when_send_keys_fails(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    hostfile_dir = tmp_path / "hosts"
+    logfile_dir = tmp_path / "logs"
+    hostfile_dir.mkdir(parents=True)
+
+    monkeypatch.setattr(pmux_main, "HOSTFILE_DIR", hostfile_dir)
+    monkeypatch.setattr(pmux_main, "LOGFILE_DIR", logfile_dir)
+    monkeypatch.setattr(
+        pmux_main.os, "uname", lambda: type("U", (), {"nodename": "localnode"})()
+    )
+    monkeypatch.setattr(pmux_main, "chdir", lambda _path: nullcontext())
+
+    calls = []
+
+    class FakeResult:
+        def __init__(self, returncode=0, stdout="", stderr=""):
+            self.returncode = returncode
+            self.stdout = stdout
+            self.stderr = stderr
+
+    def fake_run_command_local(command):
+        calls.append(command)
+        if command[:3] == ["tmux", "send-keys", "-t"]:
+            return FakeResult(returncode=1, stderr="send failed")
+        return FakeResult(returncode=0)
+
+    monkeypatch.setattr(pmux_main, "run_command_local", fake_run_command_local)
+
+    assert pmux_main.start_session("job1", "echo hello", verbose=False) is False
+
+    assert ["tmux", "kill-session", "-t", "job1"] in calls
+    assert not (hostfile_dir / "job1.host").exists()
+
+
+def test_start_session_cleans_up_when_pipe_pane_fails(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    hostfile_dir = tmp_path / "hosts"
+    logfile_dir = tmp_path / "logs"
+    hostfile_dir.mkdir(parents=True)
+
+    monkeypatch.setattr(pmux_main, "HOSTFILE_DIR", hostfile_dir)
+    monkeypatch.setattr(pmux_main, "LOGFILE_DIR", logfile_dir)
+    monkeypatch.setattr(
+        pmux_main.os, "uname", lambda: type("U", (), {"nodename": "localnode"})()
+    )
+    monkeypatch.setattr(pmux_main, "chdir", lambda _path: nullcontext())
+
+    calls = []
+
+    class FakeResult:
+        def __init__(self, returncode=0, stdout="", stderr=""):
+            self.returncode = returncode
+            self.stdout = stdout
+            self.stderr = stderr
+
+    def fake_run_command_local(command):
+        calls.append(command)
+        if command[:4] == ["tmux", "pipe-pane", "-t", "job1"]:
+            return FakeResult(returncode=1, stderr="pipe failed")
+        return FakeResult(returncode=0)
+
+    monkeypatch.setattr(pmux_main, "run_command_local", fake_run_command_local)
+
+    assert pmux_main.start_session("job1", "echo hello", verbose=False) is False
+
+    assert ["tmux", "kill-session", "-t", "job1"] in calls
+    assert not (hostfile_dir / "job1.host").exists()
+
+
+# ============================================================================
+# New tests for fixed issues
+# ============================================================================
+
+
+def test_command_parsing_with_remainder(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    """Test that command parsing uses REMAINDER to capture all remaining args."""
+    hostfile_dir = tmp_path / "hosts"
+    hostfile_dir.mkdir(parents=True)
+
+    monkeypatch.setattr(pmux_main, "HOSTFILE_DIR", hostfile_dir)
+    monkeypatch.setattr(
+        pmux_main.os, "uname", lambda: type("U", (), {"nodename": "localnode"})()
+    )
+    monkeypatch.setattr(pmux_main, "chdir", lambda _path: nullcontext())
+
+    calls = []
+
+    class FakeResult:
+        def __init__(self, returncode=0, stdout="", stderr=""):
+            self.returncode = returncode
+            self.stdout = stdout
+            self.stderr = stderr
+
+    def fake_run_command_local(command):
+        calls.append(command)
+        return FakeResult(returncode=0)
+
+    monkeypatch.setattr(pmux_main, "run_command_local", fake_run_command_local)
+
+    started = {"called": False, "job_id": None, "command": None, "verbose": None}
+
+    def fake_start_session(job_id: str, command: str, verbose: bool = False):
+        started["called"] = True
+        started["job_id"] = job_id
+        started["command"] = command
+        started["verbose"] = verbose
+        return True
+
+    monkeypatch.setattr(pmux_main, "start_session", fake_start_session)
+    monkeypatch.setattr(
+        pmux_main,
+        "attach_to_session",
+        lambda *args, **kwargs: pmux_main.CommandResult(0, "", ""),
+    )
+
+    # Test with command containing flags
+    monkeypatch.setattr(
+        pmux_main.sys, "argv", ["pmux", "job1", "--", "echo", "hello", "-f", "file.txt"]
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        pmux_main.main()
+
+    assert exc_info.value.code == 0
+    assert started["called"] is True
+    assert started["job_id"] == "job1"
+    assert "-f" in started["command"]
+    assert "file.txt" in started["command"]
+
+
+def test_get_hostfile_validation():
+    """Test that get_hostfile validates job_id format."""
+    # Valid job IDs
+    assert pmux_main.get_hostfile("job1").name == "job1.host"
+    assert pmux_main.get_hostfile("job-2").name == "job-2.host"
+    assert pmux_main.get_hostfile("job_3").name == "job_3.host"
+    assert pmux_main.get_hostfile("Job4").name == "Job4.host"
+    assert pmux_main.get_hostfile("job_5-6").name == "job_5-6.host"
+
+    # Invalid job IDs
+    with pytest.raises(ValueError):
+        pmux_main.get_hostfile("invalid@job")
+
+    with pytest.raises(ValueError):
+        pmux_main.get_hostfile("job id")  # space
+
+    with pytest.raises(ValueError):
+        pmux_main.get_hostfile("job/id")  # slash
+
+    with pytest.raises(ValueError):
+        pmux_main.get_hostfile("")  # empty
+
+
+def test_list_sessions_empty(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    """Test list_sessions returns empty list when no sessions exist."""
+    hostfile_dir = tmp_path / "hosts"
+    hostfile_dir.mkdir(parents=True)
+
+    monkeypatch.setattr(pmux_main, "HOSTFILE_DIR", hostfile_dir)
+
+    sessions = pmux_main.list_sessions()
+    assert sessions == []
+
+
+def test_list_sessions_single(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    """Test list_sessions returns a single session."""
+    hostfile_dir = tmp_path / "hosts"
+    hostfile_dir.mkdir(parents=True)
+
+    monkeypatch.setattr(pmux_main, "HOSTFILE_DIR", hostfile_dir)
+
+    # Create a valid hostfile
+    (hostfile_dir / "job1.host").write_text("node1\n")
+
+    sessions = pmux_main.list_sessions()
+    assert len(sessions) == 1
+    assert sessions[0] == ("job1", "node1")
+
+
+def test_list_sessions_multiple(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    """Test list_sessions returns multiple sessions."""
+    hostfile_dir = tmp_path / "hosts"
+    hostfile_dir.mkdir(parents=True)
+
+    monkeypatch.setattr(pmux_main, "HOSTFILE_DIR", hostfile_dir)
+
+    # Create multiple valid hostfiles
+    (hostfile_dir / "job1.host").write_text("node1\n")
+    (hostfile_dir / "job2.host").write_text("node2\n")
+    (hostfile_dir / "job3.host").write_text("node1\n")
+
+    sessions = pmux_main.list_sessions()
+    assert len(sessions) == 3
+    assert ("job1", "node1") in sessions
+    assert ("job2", "node2") in sessions
+    assert ("job3", "node1") in sessions
+
+
+def test_list_sessions_with_pattern(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    """Test list_sessions filters by pattern."""
+    hostfile_dir = tmp_path / "hosts"
+    hostfile_dir.mkdir(parents=True)
+
+    monkeypatch.setattr(pmux_main, "HOSTFILE_DIR", hostfile_dir)
+
+    # Create multiple hostfiles
+    (hostfile_dir / "job1.host").write_text("node1\n")
+    (hostfile_dir / "job2.host").write_text("node2\n")
+    (hostfile_dir / "test1.host").write_text("node3\n")
+
+    # List only jobs matching "job*" pattern
+    sessions = pmux_main.list_sessions("job*")
+    assert len(sessions) == 2
+    assert ("job1", "node1") in sessions
+    assert ("job2", "node2") in sessions
+    assert ("test1", "node3") not in sessions
+
+
+def test_list_sessions_skips_invalid_hostfiles(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    """Test list_sessions skips invalid/malformed hostfiles."""
+    hostfile_dir = tmp_path / "hosts"
+    hostfile_dir.mkdir(parents=True)
+
+    monkeypatch.setattr(pmux_main, "HOSTFILE_DIR", hostfile_dir)
+
+    # Create a valid hostfile and an invalid one
+    (hostfile_dir / "job1.host").write_text("node1\n")
+    (hostfile_dir / "job2.host").write_text("invalid node!\n")  # Invalid node name
+
+    sessions = pmux_main.list_sessions()
+    # Only job1 should be returned since job2's node is invalid
+    assert len(sessions) == 1
+    assert sessions[0] == ("job1", "node1")

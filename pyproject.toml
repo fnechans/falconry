@@ -22,6 +22,7 @@ classifiers = [
 dependencies = [
     "htcondor>=25",
     "ijson>=3.3.0",
+    "pexpect",
 ]
 
 [project.urls]
