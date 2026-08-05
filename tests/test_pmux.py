@@ -82,7 +82,7 @@ def test_attach_to_session_local_uses_terminal_subprocess(
     monkeypatch.setattr(
         pmux_main.os, "uname", lambda: type("U", (), {"nodename": "localnode"})()
     )
-    monkeypatch.setattr(pmux_main, "tmux_has_session", lambda _job_id: True)
+    monkeypatch.setattr(pmux_main, "tmux_has_session", lambda _job_id, _node=None: True)
 
     calls = []
 
@@ -105,10 +105,10 @@ def test_attach_to_session_local_uses_terminal_subprocess(
 
 
 def test_start_session_sets_trap(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
-    """Test that start_session sets up the shell trap for cleanup.
+    """Test that start_session sends the command with exit.
 
-    Note: tmux hook-based cleanup was removed; cleanup is now handled by the
-    shell trap and explicit cleanup_session() calls.
+    Note: Cleanup is now handled by explicit cleanup_session() calls.
+    The command is wrapped with '; exit' to ensure the session closes.
     """
     hostfile_dir = tmp_path / "hosts"
     logfile_dir = tmp_path / "logs"
@@ -146,10 +146,7 @@ def test_start_session_sets_trap(monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     assert new_session_cmd[:3] == ["tmux", "new-session", "-d"]
 
     assert send_keys_cmd[:4] == ["tmux", "send-keys", "-t", "job1"]
-    assert "trap" in send_keys_cmd[4]
-    assert str(hostfile_dir / "job1.host") in send_keys_cmd[4]
-    assert "EXIT HUP INT TERM" in send_keys_cmd[4]
-    assert "echo hello" in send_keys_cmd[4]
+    assert send_keys_cmd[4] == "echo hello; exit"
     assert send_keys_cmd[5] == "C-m"
 
     assert pipe_cmd[:4] == ["tmux", "pipe-pane", "-t", "job1"]

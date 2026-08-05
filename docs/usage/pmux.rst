@@ -15,7 +15,7 @@ Features
 
 - Start new tmux sessions with custom commands
 - Attach to existing sessions locally or via SSH
-- Automatic cleanup of hostfiles when sessions close normally (via shell trap)
+- Automatic cleanup of hostfiles when sessions are force-restarted or when attach fails
 - Logging of session output to log files
 - Support for force-restarting sessions (requires successful cleanup of existing session)
 
@@ -134,20 +134,21 @@ How It Works
 -----------
 
 1. When you start a session with pmux, it:
-   - Creates a tmux session with your specified command
+   - Creates a tmux session with your specified command (wrapped with ``exit`` to ensure cleanup)
    - Writes a hostfile recording which node the session is on
-   - Sets up a shell trap in the tmux session to clean up the hostfile when the command exits
    - Pipes session output to a log file
+   - Configures tmux options (e.g., ``remain-on-exit off`` so the session closes when the command exits)
 2. When you attach to an existing session:
    - pmux reads the hostfile to find which node the session is on
    - If the session is on the local node, it attaches directly
    - If the session is on a remote node, it connects via SSH and then attaches
+   - If the session no longer exists, pmux removes the stale hostfile
 
 3. Cleanup:
-   - When a tmux session closes normally, a shell trap automatically removes the hostfile
-   - When a session doesn't exist but the hostfile does, pmux removes the stale hostfile
-   - If automatic cleanup fails (e.g., session killed abruptly), use ``pmux -f <job_id>`` 
-     to force cleanup, or manually remove the hostfile
+   - When a session is force-restarted (``-f`` flag), pmux explicitly cleans up the existing session
+   - When a session doesn't exist but the hostfile does, pmux removes the stale hostfile during attach
+   - If a session setup fails partway through, pmux automatically cleans up all created artifacts
+   - Use ``pmux -f <job_id>`` to force cleanup of an existing session, or manually remove the hostfile
 
 LXPlus Considerations
 --------------------
