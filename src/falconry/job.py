@@ -422,8 +422,12 @@ class job:
             int: status of the job
         """
         # Check log file to determine if job finished with an error
-        with open(self.logFile, 'r') as fl:
-            search = fl.read()
+        try:
+            with open(self.logFile, 'r') as fl:
+                search = fl.read()
+        except OSError as e:
+            log.warning(f"Failed to read log file {self.logFile}: {e}")
+            return 0
 
         # User abortion is special case
         if "Job was aborted by the user" in search:

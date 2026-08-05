@@ -277,8 +277,13 @@ class manager:
         is_first = not os.path.exists(fileLatest)
         fileFirst = f"{saveFileName}.first"
 
-        with open(fileLatest, "w") as f:
+        # Atomic write: write to temp file, then rename
+        temp_file = f"{fileLatest}.tmp.{os.getpid()}"
+        with open(temp_file, "w") as f:
             json.dump(output, f, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.rename(temp_file, fileLatest)
         if not quiet:
             log.info("Success! Making copy with time-stamp.")
             log.debug(f"Time-stamped file: {fileSuf}")
@@ -298,7 +303,13 @@ class manager:
             os.remove(saveFileName)
         os.symlink(fileLatest.split("/")[-1], saveFileName)
 
-        # clean up old save files
+        self._cleanup_old_save_files(saveFileName)
+
+    def _cleanup_old_save_files(self, saveFileName: str) -> None:
+        """Clean up old save files, keeping only keepSaveFiles copies."""
+        fileFirst = f"{saveFileName}.first"
+        fileLatest = f"{saveFileName}.latest"
+
         files = glob(f"{saveFileName}.*")
         # remove first/latest
         # in principle the conditions are not necessary...
@@ -455,7 +466,7 @@ class manager:
 
             if isReady:
                 # Check if we did not reach maximum number of submitted jobs
-                if self.maxJobIdle != -1 and self.curJobIdle > self.maxJobIdle:
+                if self.maxJobIdle != -1 and self.curJobIdle >= self.maxJobIdle:
                     break  # break because it does not make sense to check any other jobs now
                 j.submit(doNotSubmit=True)
                 self.sub_queue.append(j)
@@ -480,18 +491,21 @@ class manager:
             )
             j.submit(force=True, doNotSubmit=True)
             self.sub_queue.append(j)
+            self.curJobIdle += 1
         elif retryFailed and status is FalconryStatus.FAILED:
             log.warning(
                 f"Error! Job {j.name} (id {j.jobID}) failed and will be retried, rerunning"
             )
             j.submit(force=True, doNotSubmit=True)
             self.sub_queue.append(j)
+            self.curJobIdle += 1
         elif retryFailed and status is FalconryStatus.REMOVED:
             log.warning(
                 f"Error! Job {j.name} (id {j.jobID}) was removed and will be retried, rerunning"
             )
             j.submit(force=True, doNotSubmit=True)
             self.sub_queue.append(j)
+            self.curJobIdle += 1
         elif (
             retryFailed
             and j.submitted
@@ -505,6 +519,7 @@ class manager:
             )
             j.submit(force=True, doNotSubmit=True)
             self.sub_queue.append(j)
+            self.curJobIdle += 1
         elif retryFailed and j.skipped:
             log.warning(
                 f"Error! Job {j.name} was skipped and will be retried, rerunning"
@@ -582,6 +597,13 @@ class manager:
         """Submits all jobs in the submission queue."""
 
         if len(self.sub_queue) == 0:
+            return
+
+        # Check maxJobIdle limit before submitting
+        if self.maxJobIdle != -1 and self.curJobIdle >= self.maxJobIdle:
+            log.info(
+                f"Maximum idle jobs ({self.maxJobIdle}) reached, not submitting more"
+            )
             return
 
         # First we need to group jobs with the same executable
