@@ -45,11 +45,10 @@ def get_hostfile(job_id: str) -> Path:
     """
     # validate job_id
     if not re.match(r'^[A-Za-z0-9_-]+$', job_id):
-        log.error(
+        raise ValueError(
             f"Invalid job id: {job_id}, must contain only letters, "
             "numbers, hyphens, and underscores"
         )
-        raise ValueError
     return HOSTFILE_DIR / f"{job_id}.host"
 
 
@@ -66,16 +65,20 @@ def read_hostfile(job_id: str) -> Optional[str]:
     if not hostfile.exists():
         return None
 
-    with open(hostfile) as f:
-        lines = [line.strip() for line in f.readlines() if line.strip()]
+    try:
+        with open(hostfile) as f:
+            lines = [line.strip() for line in f.readlines() if line.strip()]
+    except OSError as e:
+        log.error(f"Failed to read hostfile {hostfile} for job {job_id}: {e}")
+        return None
 
     if len(lines) != 1:
-        log.warning(f"Hostfile {hostfile} is malformed (expected 1 non-empty line)")
+        log.warning(f"Hostfile {hostfile} for job {job_id} is malformed (expected 1 non-empty line)")
         return None
 
     node = lines[0]
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", node):
-        log.warning(f"Hostfile {hostfile} contains invalid node value: {node}")
+        log.warning(f"Hostfile {hostfile} for job {job_id} contains invalid node value: {node}")
         return None
 
     return node
@@ -89,6 +92,7 @@ def write_hostfile(job_id: str, node: str) -> None:
         node (str): node address
     Raises:
         ValueError: If node is invalid
+        OSError: If file write fails
     """
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", node):
         raise ValueError(
@@ -96,10 +100,13 @@ def write_hostfile(job_id: str, node: str) -> None:
         )
 
     hostfile = get_hostfile(job_id)
-    with open(hostfile, "w") as f:
-        f.write(node)
-        f.flush()
-        os.fsync(f.fileno())
+    try:
+        with open(hostfile, "w") as f:
+            f.write(node)
+            f.flush()
+            os.fsync(f.fileno())
+    except OSError as e:
+        raise OSError(f"Failed to write hostfile {hostfile} for job {job_id}: {e}")
 
 
 def get_logfile(job_id: str) -> Path:
@@ -136,13 +143,13 @@ def tmux_has_session(job_id: str, node: Optional[str] = None) -> Optional[bool]:
             # Use stderr to distinguish: SSH writes diagnostic messages there
             if result.stderr and "ssh:" in result.stderr.lower():
                 log.warning(
-                    f"SSH to {node} failed with exit code {result.returncode}: {result.stderr.strip()}"
+                    f"SSH to {node} failed for job {job_id} with exit code {result.returncode}: {result.stderr.strip()}"
                 )
                 return None
             # Also treat high exit codes (>1) as SSH errors since tmux only returns 0 or 1
             if result.returncode > 1:
                 log.warning(
-                    f"SSH to {node} failed with exit code {result.returncode}: {result.stderr.strip()}"
+                    f"SSH to {node} failed for job {job_id} with exit code {result.returncode}: {result.stderr.strip()}"
                 )
                 return None
         return result.returncode == 0
@@ -183,16 +190,18 @@ def cleanup_session(job_id: str) -> bool:
 
     # If we couldn't determine session status (e.g., SSH failed), don't clean up
     if session_exists is None:
+        node_desc = node or 'local'
         log.error(
-            f"Cannot verify session {job_id} on {node} (SSH/connection error). Keeping hostfile."
+            f"Cannot verify session {job_id} on {node_desc} (SSH/connection error). Keeping hostfile."
         )
         return False
 
     if session_exists:
         result = tmux_kill_session(job_id, node)
         if result.returncode != 0:
+            node_desc = node or 'local'
             log.error(
-                f"Failed to kill session {job_id} on {node or 'local'}: {result.stderr}"
+                f"Failed to kill session {job_id} on {node_desc}: {result.stderr}"
             )
             return False
 
@@ -230,12 +239,16 @@ def attach_to_session(job_id: str, node: Optional[str]) -> CommandResult:
             log.error(f"Session {job_id} not found on {node}.")
             return CommandResult(1, "", f"Session {job_id} not found on {node}")
 
-        child = pexpect.spawn(
-            "ssh",
-            ["-tt", node, *tmux_cmd],
-            encoding='utf-8',
-            codec_errors='replace',
-        )
+        try:
+            child = pexpect.spawn(
+                "ssh",
+                ["-tt", node, *tmux_cmd],
+                encoding='utf-8',
+                codec_errors='replace',
+            )
+        except pexpect.ExceptionPexpect as e:
+            log.error(f"Failed to spawn SSH process for job {job_id} on {node}: {e}")
+            return CommandResult(1, "", f"SSH connection failed: {e}")
         child.expect(".*")
         child.interact()
         stdout = (
@@ -254,13 +267,13 @@ def attach_to_session(job_id: str, node: Optional[str]) -> CommandResult:
         session_exists = tmux_has_session(job_id)
         # For local check, session_exists should never be None, but handle it anyway
         if session_exists is None:
-            log.error(f"Cannot verify local session {job_id}.")
-            return CommandResult(1, "", f"Cannot verify session {job_id}")
+            log.error(f"Cannot verify local session {job_id} on {local_node}.")
+            return CommandResult(1, "", f"Cannot verify session {job_id} on {local_node}")
         if not session_exists:
             log.error(f"Session {job_id} not found on {local_node}.")
             # remove stale hostfile if session does not exist anymore
             if get_hostfile(job_id).exists():
-                log.warning(f"Removing stale hostfile for {job_id}")
+                log.warning(f"Removing stale hostfile for job {job_id}")
                 get_hostfile(job_id).unlink()
             return CommandResult(1, "", f"Session {job_id} not found on {local_node}")
 
@@ -296,34 +309,45 @@ def start_session(
         trap_command = f'trap "rm -f {hostfile_quoted}" EXIT HUP INT TERM'
         wrapped_command = f"{trap_command}; {command}; exit"
     else:
-        log.error("No command provided for a new session")
+        log.error(f"No command provided for new session {job_id}")
         return False
 
     # Start session (inherits parent environment by default)
     with chdir(HOSTFILE_DIR):
         result = run_command_local(cmd)
         if result.returncode != 0:
-            log.error(f"Failed to start tmux session: {result.stderr}")
+            log.error(f"Failed to start tmux session for job {job_id} on {node}: {result.stderr}")
             return False
 
         send_cmd = ["tmux", "send-keys", "-t", job_id, wrapped_command, "C-m"]
         result = run_command_local(send_cmd)
         if result.returncode != 0:
-            log.error(f"Failed to dispatch command to tmux session: {result.stderr}")
+            log.error(f"Failed to dispatch command to tmux session for job {job_id} on {node}: {result.stderr}")
             cleanup_failed_start(job_id)
             return False
 
-        LOGFILE_DIR.mkdir(exist_ok=True)
-        with open(get_logfile(job_id), "a") as f:
-            f.write(
-                f"#\n# Session {job_id} started on {node} at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n#\n"
-            )
+        try:
+            LOGFILE_DIR.mkdir(exist_ok=True)
+        except OSError as e:
+            log.error(f"Failed to create logfile directory {LOGFILE_DIR} for job {job_id}: {e}")
+            cleanup_failed_start(job_id)
+            return False
+
+        try:
+            with open(get_logfile(job_id), "a") as f:
+                f.write(
+                    f"#\n# Session {job_id} started on {node} at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n#\n"
+                )
+        except OSError as e:
+            log.error(f"Failed to write to logfile for job {job_id} on {node}: {e}")
+            cleanup_failed_start(job_id)
+            return False
 
         logfile_quoted = shlex.quote(str(get_logfile(job_id)))
         pipe_cmd = ["tmux", "pipe-pane", "-t", job_id, f"cat >> {logfile_quoted}"]
         result = run_command_local(pipe_cmd)
         if result.returncode != 0:
-            log.error(f"Failed to enable tmux logging: {result.stderr}")
+            log.error(f"Failed to enable tmux logging for job {job_id} on {node}: {result.stderr}")
             cleanup_failed_start(job_id)
             return False
 
@@ -338,10 +362,19 @@ def start_session(
         ]
         result = run_command_local(remain_on_exit_cmd)
         if result.returncode != 0:
-            log.warning(f"Failed to set remain-on-exit: {result.stderr}")
+            log.warning(f"Failed to set remain-on-exit for job {job_id} on {node}: {result.stderr}")
 
     # Write hostfile
-    write_hostfile(job_id, node)
+    try:
+        write_hostfile(job_id, node)
+    except ValueError as e:
+        log.error(f"Invalid node value for job {job_id}: {e}")
+        cleanup_failed_start(job_id)
+        return False
+    except OSError as e:
+        log.error(f"Failed to write hostfile for job {job_id} on {node}: {e}")
+        cleanup_failed_start(job_id)
+        return False
 
     log.info(f"Started {job_id} on {node}")
     if command:
@@ -368,7 +401,7 @@ def handle_new_session(
     args: argparse.Namespace, parser: argparse.ArgumentParser
 ) -> None:
     """Handle starting a new session and optionally attaching to it."""
-    command = " ".join(args.command)
+    command = shlex.join(args.command)
     if not command:
         parser.error(
             "command is required when starting a new session; "
@@ -382,14 +415,16 @@ def handle_new_session(
         handle_lxplus_warning()
 
     if not start_session(args.job_id, command, args.verbose):
+        log.error(f"Failed to start session {args.job_id}")
         sys.exit(1)
 
+    log.info(f"You can find the tmux log file at {get_logfile(args.job_id)}")
     if args.attach:
+        log.info(f"Attaching to session {args.job_id}")
         result = attach_to_session(args.job_id, os.uname().nodename)
         log.info(f"Finished with an exit code of {result.returncode}")
         if result.returncode != 0:
             log.error(f"Error: {result.stderr}")
-        log.info(f"You can find the tmux log file at {get_logfile(args.job_id)}")
         sys.exit(result.returncode)
 
     log.info(f"Session {args.job_id} started successfully")
@@ -413,7 +448,8 @@ def handle_existing_session(args: argparse.Namespace) -> None:
 
     node = read_hostfile(args.job_id)
     if not node:
-        log.error(f"Hostfile exists but unreadable for {args.job_id}")
+        hostfile = get_hostfile(args.job_id)
+        log.error(f"Hostfile exists but unreadable for job {args.job_id} at {hostfile}")
         sys.exit(1)
 
     result = attach_to_session(args.job_id, node)
@@ -481,7 +517,11 @@ def main() -> None:
         log.setLevel(logging.DEBUG)
 
     HOSTFILE_DIR.mkdir(parents=True, exist_ok=True)
-    host_exists = os.path.exists(get_hostfile(args.job_id))
+    try:
+        host_exists = os.path.exists(get_hostfile(args.job_id))
+    except ValueError as e:
+        log.error(f"Invalid job id '{args.job_id}': {e}")
+        sys.exit(1)
 
     if args.force_start:
         if not cleanup_session(args.job_id):
