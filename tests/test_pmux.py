@@ -313,3 +313,87 @@ def test_get_hostfile_validation():
 
     with pytest.raises(ValueError):
         pmux_main.get_hostfile("")  # empty
+
+
+def test_list_sessions_empty(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    """Test list_sessions returns empty list when no sessions exist."""
+    hostfile_dir = tmp_path / "hosts"
+    hostfile_dir.mkdir(parents=True)
+
+    monkeypatch.setattr(pmux_main, "HOSTFILE_DIR", hostfile_dir)
+
+    sessions = pmux_main.list_sessions()
+    assert sessions == []
+
+
+def test_list_sessions_single(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    """Test list_sessions returns a single session."""
+    hostfile_dir = tmp_path / "hosts"
+    hostfile_dir.mkdir(parents=True)
+
+    monkeypatch.setattr(pmux_main, "HOSTFILE_DIR", hostfile_dir)
+
+    # Create a valid hostfile
+    (hostfile_dir / "job1.host").write_text("node1\n")
+
+    sessions = pmux_main.list_sessions()
+    assert len(sessions) == 1
+    assert sessions[0] == ("job1", "node1")
+
+
+def test_list_sessions_multiple(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    """Test list_sessions returns multiple sessions."""
+    hostfile_dir = tmp_path / "hosts"
+    hostfile_dir.mkdir(parents=True)
+
+    monkeypatch.setattr(pmux_main, "HOSTFILE_DIR", hostfile_dir)
+
+    # Create multiple valid hostfiles
+    (hostfile_dir / "job1.host").write_text("node1\n")
+    (hostfile_dir / "job2.host").write_text("node2\n")
+    (hostfile_dir / "job3.host").write_text("node1\n")
+
+    sessions = pmux_main.list_sessions()
+    assert len(sessions) == 3
+    assert ("job1", "node1") in sessions
+    assert ("job2", "node2") in sessions
+    assert ("job3", "node1") in sessions
+
+
+def test_list_sessions_with_pattern(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    """Test list_sessions filters by pattern."""
+    hostfile_dir = tmp_path / "hosts"
+    hostfile_dir.mkdir(parents=True)
+
+    monkeypatch.setattr(pmux_main, "HOSTFILE_DIR", hostfile_dir)
+
+    # Create multiple hostfiles
+    (hostfile_dir / "job1.host").write_text("node1\n")
+    (hostfile_dir / "job2.host").write_text("node2\n")
+    (hostfile_dir / "test1.host").write_text("node3\n")
+
+    # List only jobs matching "job*" pattern
+    sessions = pmux_main.list_sessions("job*")
+    assert len(sessions) == 2
+    assert ("job1", "node1") in sessions
+    assert ("job2", "node2") in sessions
+    assert ("test1", "node3") not in sessions
+
+
+def test_list_sessions_skips_invalid_hostfiles(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    """Test list_sessions skips invalid/malformed hostfiles."""
+    hostfile_dir = tmp_path / "hosts"
+    hostfile_dir.mkdir(parents=True)
+
+    monkeypatch.setattr(pmux_main, "HOSTFILE_DIR", hostfile_dir)
+
+    # Create a valid hostfile and an invalid one
+    (hostfile_dir / "job1.host").write_text("node1\n")
+    (hostfile_dir / "job2.host").write_text("invalid node!\n")  # Invalid node name
+
+    sessions = pmux_main.list_sessions()
+    # Only job1 should be returned since job2's node is invalid
+    assert len(sessions) == 1
+    assert sessions[0] == ("job1", "node1")
