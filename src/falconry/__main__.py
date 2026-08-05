@@ -72,43 +72,91 @@ def config() -> argparse.ArgumentParser:
 
 
 def get_name(command: str) -> str:
-    """Get name from command by replacing various symbols with `_`.
+    """Get sanitized name from command by replacing various symbols with `_`.
+
+    Handles edge cases like empty strings and enforces length limits.
 
     Arguments:
         command (str): command to get name from
     Returns:
-        str: name of the job for given command
+        str: sanitized name of the job for given command
     """
-    strings_to_replace = ['--', ' ', '.', '/', '-', '`', '(', ')', '$', '"', "'", "\\"]
+    if not command or not command.strip():
+        return "unnamed_job"
+
+    strings_to_replace = [
+        '--',
+        ' ',
+        '.',
+        '/',
+        '-',
+        '`',
+        '(',
+        ')',
+        '$',
+        '"',
+        "'",
+        "\\",
+        '&&',
+        '||',
+        '|',
+        '>',
+        '<',
+        ';',
+        '&',
+        ':',
+        '=',
+    ]
     for string in strings_to_replace:
         command = command.replace(string, '_')
 
-    # remove multiple _
-    return '_'.join([x for x in command.split('_') if x != ''])
+    # remove multiple _ and strip leading/trailing underscores
+    name = '_'.join([x for x in command.split('_') if x != '']).strip('_')
+
+    # Ensure non-empty
+    if not name:
+        name = "unnamed_job"
+
+    # Limit length to prevent filesystem issues
+    max_length = 100
+    if len(name) > max_length:
+        name = name[:max_length] + "_trunc"
+
+    return name
 
 
 def parse_job(line: str) -> tuple[str, str]:
     """
     Parse '[NAME] COMMAND' format.
-    Returns (name, command). Name is None if no brackets.
+    Returns (name, command). Name is generated from command if no brackets or if name is empty.
 
     Arguments:
         line (str): line to parse
 
     Returns:
-        tuple[str | None, str]: (name, command)
+        tuple[str, str]: (name, command)
+
+    Raises:
+        ValueError: if line is empty or command is missing after name
     """
+    if not line or not line.strip():
+        raise ValueError("Empty line cannot be parsed as a job")
+
     pattern = r'^\[([^$$]+)\]\s*(.*)$'
     match = re.match(pattern, line.strip())
 
     if match:
-        command = match.group(2)
+        name = match.group(1).strip()
+        command = match.group(2).strip()
         if command == '':
             raise ValueError(f"No command found for {line}")
-        return match.group(1), match.group(2)
+        if not name:
+            name = get_name(command)
+        return name, command
 
     # No valid bracket syntax - entire line is command
-    return get_name(line), line.strip()
+    stripped_line = line.strip()
+    return get_name(stripped_line), stripped_line
 
 
 class Block:
@@ -173,8 +221,12 @@ def process_commands(commands: str, mgr: manager, time: int, ncpu: int = 1) -> N
     # First check if we are dealing with file
     if os.path.isfile(commands):
         log.info(f'Processing commands from file {commands}')
-        with open(commands) as f:
-            lines = f.readlines()
+        try:
+            with open(commands) as f:
+                lines = f.readlines()
+        except IOError as e:
+            log.error(f'Failed to read commands file {commands}: {e}')
+            raise
     else:
         log.info(f'Processing commands string `{commands}`')
         lines = commands.split(';')
@@ -210,9 +262,7 @@ def main() -> None:
     log.info('Setting up `falconry` to run your commands')
     cfg = config().parse_args()
     condor_dir = os.path.join(cfg.dir, cfg.subdir)
-    mgr = manager(
-        condor_dir
-    )  # the argument specifies where the job is saved
+    mgr = manager(condor_dir)  # the argument specifies where the job is saved
 
     if cfg.verbose:
         log.setLevel(logging.DEBUG)

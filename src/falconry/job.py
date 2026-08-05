@@ -127,10 +127,12 @@ class job:
             jobDict (Dict[str, Any]): dictionary containing job information
         """
 
-        # TODO: define proper "jobDict checker"
-        if "jobIDs" not in jobDict.keys() and "config" not in jobDict.keys():
-            log.error("Job dictionary in a wrong form")
-            raise SystemError
+        # Validate required keys
+        required_keys = ["jobIDs", "config"]
+        missing_keys = [k for k in required_keys if k not in jobDict]
+        if missing_keys:
+            log.error(f"Job dictionary missing required keys: {missing_keys}")
+            raise ValueError(f"Job dictionary missing required keys: {missing_keys}")
 
         # the htcondor version of the configuration
         self.config = jobDict["config"]

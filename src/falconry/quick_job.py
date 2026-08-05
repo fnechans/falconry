@@ -51,13 +51,15 @@ def quick_job(
     env = f'basedir={basedir};'
 
     condor_options = {'environment': env, 'getenv': 'True'}
-    # Some cluster specific settings which might break submission on other clusters
-    if "cern.ch" in str(schedd.location):
+    # Cluster-specific settings - these may need updating if cluster configurations change
+    # Note: These settings are automatically applied based on the schedd location
+    schedd_loc = str(schedd.location)
+    if "cern.ch" in schedd_loc:
         condor_options["MY.SendCredential"] = "True"
     elif is_desy:
         condor_options["MY.SendCredential"] = "True"
         condor_options["Requirements"] = '(OpSysAndVer == "RedHat9")'
-    if 'particle.cz' in str(schedd.location):
+    if 'particle.cz' in schedd_loc:
         home = os.getenv("HOME")
         if home is not None:
             condor_options["x509userproxy"] = home + "/x509up_u{0}".format(os.geteuid())

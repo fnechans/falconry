@@ -13,7 +13,7 @@ import copy
 from glob import glob
 from typing import Dict, Any, Tuple, Optional
 
-from .lock import lock, LockFileException
+from .lock import lock, LockFile, LockFileException
 from .job import job
 from .status import FalconryStatus
 from . import cli
@@ -101,8 +101,10 @@ class manager:
         self.lockFile = os.path.join(self.dir, 'lock')
         log.addHandler(logging.FileHandler(self.logFile))
 
+        # Check if another manager instance is already running using atomic locking
         try:
-            self._check_lock()
+            with LockFile(self.lockFile):
+                pass  # Lock acquired and immediately released - just checking if possible
         except LockFileException:
             sys.exit(1)
 
@@ -114,18 +116,6 @@ class manager:
         self.maxJobIdle = maxJobIdle
         self.curJobIdle = 0
         self.keepSaveFiles = keepSaveFiles
-
-    def _check_lock(self) -> None:
-        """Raises an exception if the lock file already exists.
-
-        This indicates that the manager is already running.
-        """
-        if os.path.exists(self.lockFile):
-            log.error(f"Manager instance is already running in {self.dir}")
-            log.debug(
-                f"Delete {self.lockFile} to start a new instance if you think this is a mistake"
-            )
-            raise LockFileException
 
     def _delete(self) -> None:
         """Deletes the contents of the manager directory,
@@ -278,10 +268,11 @@ class manager:
         else:
             saveFileName = self.saveFileName
 
-        # save with a timestamp as a suffix, create sym link
+        # save with a timestamp and process ID as a suffix, create sym link
         current_time = datetime.datetime.now().strftime("%Y%m%d_%H%M_%S")
         fileLatest = f"{saveFileName}.latest"
-        fileSuf = f"{saveFileName}.{current_time}"  # only if not quiet
+        # Include process ID to avoid race conditions with timestamp
+        fileSuf = f"{saveFileName}.{current_time}_{os.getpid()}"  # only if not quiet
 
         is_first = not os.path.exists(fileLatest)
         fileFirst = f"{saveFileName}.first"
@@ -291,15 +282,16 @@ class manager:
         if not quiet:
             log.info("Success! Making copy with time-stamp.")
             log.debug(f"Time-stamped file: {fileSuf}")
-            if not os.path.exists(fileSuf):
+            try:
                 shutil.copyfile(fileLatest, fileSuf)
-            else:
-                raise FileExistsError(
-                    f"Destination file {fileSuf} already exists. "
-                    "This should not be possible."
-                )
+            except IOError as e:
+                log.warning(f"Failed to create timestamped copy {fileSuf}: {e}")
+                # Not critical - the .latest file is the important one
         if is_first:
-            shutil.copyfile(fileLatest, fileFirst)
+            try:
+                shutil.copyfile(fileLatest, fileFirst)
+            except IOError as e:
+                log.warning(f"Failed to create first copy {fileFirst}: {e}")
 
         # not necessary to remove, but maybe better to be sure its not broken
         if os.path.exists(saveFileName):
