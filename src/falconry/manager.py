@@ -434,7 +434,7 @@ class manager:
                     log.info("Last 10 lines of error file:")
                     print(tail_file(j.errFile, 10))
 
-    def _add_to_queue(self, j: job, force: bool):
+    def _add_to_queue(self, j: job, force: bool) -> None:
         """Adds job to queue if not there already and not full
         """
         if self.maxJobIdle != -1 and self.curJobIdle >= self.maxJobIdle:

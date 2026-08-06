@@ -82,7 +82,7 @@ def get_name(command: str) -> str:
         str: sanitized name of the job for given command
     """
     if not command or not command.strip():
-        return "unnamed_job"
+        raise ValueError("Command cannot be empty")
 
     strings_to_replace = [
         '--',
@@ -113,9 +113,8 @@ def get_name(command: str) -> str:
     # remove multiple _ and strip leading/trailing underscores
     name = '_'.join([x for x in command.split('_') if x != '']).strip('_')
 
-    # Ensure non-empty
     if not name:
-        name = "unnamed_job"
+        raise ValueError("Job name empty after sanitization")
 
     # Limit length to prevent filesystem issues
     max_length = 100

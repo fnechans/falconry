@@ -35,7 +35,7 @@ class LockFile:
             raise LockFileException
         except Exception:
             # If we acquired the lock but writing failed, release it
-            if self._lock and self._lock.is_locked:
+            if self._lock.is_locked:
                 try:
                     self._lock.release()
                 except Exception:
@@ -64,7 +64,7 @@ FuncT = TypeVar("FuncT", bound=Callable[..., Any])
 
 def lock(func: FuncT) -> FuncT:
     """Decorator to lock a method using the manager's lock file.
-    
+
     Expects the first argument (self) to have a 'lockFile' attribute.
     """
     def wrapper(*args: Any, **kwargs: Any) -> Any:

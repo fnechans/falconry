@@ -231,9 +231,6 @@ class TestCheckDependenceMultipleDeps:
 
         mgr._check_dependence()
 
-        # BUG: Current implementation would break after checking dep1 (done, continue)
-        # then dep2 (not done, set isReady=False, break) - so it WOULD set isReady=False
-        # But the break means it doesn't check all deps properly
         assert j not in mgr.sub_queue
 
     def test_failed_dep_skips_job(self, mgr, make_job):

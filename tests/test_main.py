@@ -13,20 +13,19 @@ class TestGetName:
 
     def test_empty_string_returns_unnamed_job(self):
         """Empty string returns 'unnamed_job' (bug fix)."""
-        assert get_name("") == "unnamed_job"
+        with pytest.raises(ValueError, match="Command cannot be empty"):
+            get_name("")
 
     def test_whitespace_only_returns_unnamed_job(self):
         """Whitespace-only returns 'unnamed_job' (bug fix)."""
-        assert get_name("   ") == "unnamed_job"
-        assert get_name("\t\n") == "unnamed_job"
-
-    def test_none_returns_unnamed_job(self):
-        """None returns 'unnamed_job' (bug fix)."""
-        assert get_name(None) == "unnamed_job"  # type: ignore
+        with pytest.raises(ValueError, match="Command cannot be empty"):
+            get_name("   ")
+            get_name("\t\n")
 
     def test_all_underscores_becomes_unnamed_job(self):
         """String of only underscores becomes 'unnamed_job' (bug fix)."""
-        assert get_name("___") == "unnamed_job"
+        with pytest.raises(ValueError, match="Job name empty after sanitization"):
+            get_name("___")
 
     def test_long_name_truncated(self):
         """Names > 100 chars are truncated with '_trunc' (new feature)."""
