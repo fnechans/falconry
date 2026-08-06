@@ -144,36 +144,6 @@ class TestManagerDependence:
         assert j in mgr.sub_queue
 
 
-class TestManagerSubmitJobs:
-    """Tests for the bug where maxJobIdle was not checked before submission."""
-
-    @pytest.fixture
-    def mgr(self, tmp_path, schedd):
-        return manager(str(tmp_path), schedd=schedd, maxJobIdle=2)
-
-    def test_halts_at_limit(self, mgr, make_job):
-        """Submission halts when curJobIdle >= maxJobIdle (bug fix)."""
-        mgr.curJobIdle = 2  # == maxJobIdle
-
-        j = make_job(name="job1")
-        mgr.sub_queue.append(j)
-
-        mgr._submit_jobs()
-
-        j.submit_done.assert_not_called()
-
-    def test_submits_under_limit(self, mgr, make_job):
-        """Jobs are submitted when curJobIdle < maxJobIdle."""
-        mgr.curJobIdle = 1  # < maxJobIdle (2)
-
-        j = make_job(name="job1")
-        mgr.sub_queue.append(j)
-
-        mgr._submit_jobs()
-
-        j.submit_done.assert_called_once()
-
-
 class TestManagerCleanup:
     """Tests for save file cleanup functionality."""
 

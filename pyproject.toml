@@ -23,6 +23,7 @@ dependencies = [
     "htcondor>=25",
     "ijson>=3.3.0",
     "pexpect",
+    "filelock>=3.0",
 ]
 
 [project.urls]

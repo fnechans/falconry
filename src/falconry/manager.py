@@ -434,6 +434,17 @@ class manager:
                     log.info("Last 10 lines of error file:")
                     print(tail_file(j.errFile, 10))
 
+    def _add_to_queue(self, j: job, force: bool):
+        """Adds job to queue if not there already and not full
+        """
+        if self.maxJobIdle != -1 and self.curJobIdle >= self.maxJobIdle:
+            return  # Skip this job but continue checking others
+        if j in self.sub_queue:
+            return
+        j.submit(force=force, doNotSubmit=True)
+        self.sub_queue.append(j)
+        self.curJobIdle += 1
+
     def _check_dependence(self) -> None:
         """Checks status of all jobs and their dependencies to determine
         if job is skipped or needs resubmission.
@@ -449,9 +460,7 @@ class manager:
                     log.warning(
                         f"Error! Job {j.name} (id {j.jobID}) failed due to condor, rerunning"
                     )
-                    j.submit(force=True, doNotSubmit=True)
-                    self.sub_queue.append(j)
-                    self.curJobIdle += 1
+                    self._add_to_queue(j, force=True)
                     continue  # Move to next job after resubmitting
                 continue
 
@@ -485,12 +494,7 @@ class manager:
                     break
 
             if isReady:
-                # Check if we did not reach maximum number of submitted jobs
-                if self.maxJobIdle != -1 and self.curJobIdle >= self.maxJobIdle:
-                    continue  # Skip this job but continue checking others
-                j.submit(doNotSubmit=True)
-                self.sub_queue.append(j)
-                self.curJobIdle += 1  # Add the jobs as a idle for now
+                self._add_to_queue(j, force=False)
 
     def _check_resubmit(self, j: job, retryFailed: bool = False) -> FalconryStatus:
         """Checks if a job should be resubmitted due to some known problems.
@@ -505,27 +509,26 @@ class manager:
         """
         status = j.get_status()
         log.debug("Job %s has status %s", j.name, status.name)
-        if status is FalconryStatus.ABORTED_BY_USER:
+        if retryFailed and j.skipped:
+            log.warning(
+                f"Error! Job {j.name} was skipped and will be retried, rerunning"
+            )
+            j.skipped = False
+        elif status is FalconryStatus.ABORTED_BY_USER:
             log.warning(
                 f"Error! Job {j.name} (id {j.jobID}) failed due to condor, rerunning"
             )
-            j.submit(force=True, doNotSubmit=True)
-            self.sub_queue.append(j)
-            self.curJobIdle += 1
+            self._add_to_queue(j, force=True)
         elif retryFailed and status is FalconryStatus.FAILED:
             log.warning(
                 f"Error! Job {j.name} (id {j.jobID}) failed and will be retried, rerunning"
             )
-            j.submit(force=True, doNotSubmit=True)
-            self.sub_queue.append(j)
-            self.curJobIdle += 1
+            self._add_to_queue(j, force=True)
         elif retryFailed and status is FalconryStatus.REMOVED:
             log.warning(
                 f"Error! Job {j.name} (id {j.jobID}) was removed and will be retried, rerunning"
             )
-            j.submit(force=True, doNotSubmit=True)
-            self.sub_queue.append(j)
-            self.curJobIdle += 1
+            self._add_to_queue(j, force=True)
         elif (
             retryFailed
             and j.submitted
@@ -537,14 +540,7 @@ class manager:
             log.warning(
                 f"Error! Job {j.name} was not submitted succesfully (probably...), rerunning"
             )
-            j.submit(force=True, doNotSubmit=True)
-            self.sub_queue.append(j)
-            self.curJobIdle += 1
-        elif retryFailed and j.skipped:
-            log.warning(
-                f"Error! Job {j.name} was skipped and will be retried, rerunning"
-            )
-            j.skipped = False
+            self._add_to_queue(j, force=True)
         # If job did not change, return original status,
         # otherwise return new status
         else:
@@ -626,13 +622,6 @@ class manager:
         """Submits all jobs in the submission queue."""
 
         if len(self.sub_queue) == 0:
-            return
-
-        # Check maxJobIdle limit before submitting
-        if self.maxJobIdle != -1 and self.curJobIdle >= self.maxJobIdle:
-            log.info(
-                f"Maximum idle jobs ({self.maxJobIdle}) reached, not submitting more"
-            )
             return
 
         # First we need to group jobs with the same executable
