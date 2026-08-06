@@ -354,7 +354,13 @@ class manager:
                 self._add_job(j, update=True)
 
                 # decorate the list of names of the dependencies
-                depNames[j.name] = jobDict["depNames"]
+                dep_names = jobDict.get("depNames", [])
+                if not isinstance(dep_names, list):
+                    log.error(
+                        f"depNames for job {name} is not a list: {type(dep_names)}"
+                    )
+                    dep_names = []
+                depNames[j.name] = dep_names
 
         # Now that jobs are defined, dependencies can be recreated
         # also resubmit jobs which failed
@@ -430,30 +436,45 @@ class manager:
 
     def _check_dependence(self) -> None:
         """Checks status of all jobs and their dependencies to determine
-        if job is skipped. This is purely for printing purposes,
-        in the backend, jobs are
+        if job is skipped or needs resubmission.
         """
 
         # TODO: consider if not submitted jobs in a special list
         for name, j in self.jobs.items():
+            # Check if job needs resubmission (condor problems)
+            if j.submitted and not j.skipped and not j.done:
+                status = j.get_status()
+                # Always resubmit ABORTED_BY_USER jobs
+                if status == FalconryStatus.ABORTED_BY_USER:
+                    log.warning(
+                        f"Error! Job {j.name} (id {j.jobID}) failed due to condor, rerunning"
+                    )
+                    j.submit(force=True, doNotSubmit=True)
+                    self.sub_queue.append(j)
+                    self.curJobIdle += 1
+                    continue  # Move to next job after resubmitting
+                continue
+
             # only check jobs which are neither submitted nor skipped
             if j.submitted or j.skipped:
                 continue
 
-            # if ready submit, single not done dependency leads to isReady=False
+            # Check all dependencies - a job is ready only if ALL are done
             isReady = True
             for tarJob in j.dependencies:
-                # if any job is not done, do not submit
                 if tarJob.done:
                     continue
 
+                # Found a non-done dependency - job is not ready
                 isReady = False
 
+                # Check if this dependency requires the job to be skipped
                 if tarJob.skipped or tarJob.failed:
                     log.error(
                         f"Job {name} depends on job {tarJob.name} which either failed or was skipped! Skipping ..."
                     )
                     j.skipped = True
+                    break
 
                 status = tarJob.get_status()
                 if status == FalconryStatus.REMOVED:
@@ -461,13 +482,12 @@ class manager:
                         f"Job {name} depends on job {tarJob.name} which is {FalconryStatus.REMOVED}! Skipping ..."
                     )
                     j.skipped = True
-
-                break
+                    break
 
             if isReady:
                 # Check if we did not reach maximum number of submitted jobs
                 if self.maxJobIdle != -1 and self.curJobIdle >= self.maxJobIdle:
-                    break  # break because it does not make sense to check any other jobs now
+                    continue  # Skip this job but continue checking others
                 j.submit(doNotSubmit=True)
                 self.sub_queue.append(j)
                 self.curJobIdle += 1  # Add the jobs as a idle for now
@@ -555,7 +575,6 @@ class manager:
 
     def _count_job(self, c: Counter, j: job) -> None:  # noqa: ignore=C901
         """Updates the counter object with the status of a single job.
-        Also resubmits jobs which failed due to condor problems.
 
         Arguments:
             c (counter): counter object to update
@@ -572,8 +591,8 @@ class manager:
             c.done += 1
             return
 
-        #  resubmit job which failed due to condor problems
-        status = self._check_resubmit(j)
+        # Just get status for counting - no resubmission side effects
+        status = j.get_status()
 
         if (
             status == FalconryStatus.NOT_SUBMITTED
@@ -592,6 +611,16 @@ class manager:
             c.held += 1
         elif status == FalconryStatus.REMOVED:
             c.removed += 1
+        elif status == FalconryStatus.ABORTED_BY_USER:
+            c.failed += 1
+        elif status == FalconryStatus.UNKNOWN:
+            c.waiting += 1
+        elif status == FalconryStatus.TRANSPORTING:
+            c.run += 1
+        elif status == FalconryStatus.SUSPENDED:
+            c.held += 1
+        elif status == FalconryStatus.ABNORMAL_TERMINATION:
+            c.failed += 1
 
     def _submit_jobs(self) -> None:
         """Submits all jobs in the submission queue."""

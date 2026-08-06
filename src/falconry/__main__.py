@@ -142,7 +142,7 @@ def parse_job(line: str) -> tuple[str, str]:
     if not line or not line.strip():
         raise ValueError("Empty line cannot be parsed as a job")
 
-    pattern = r'^\[([^$$]+)\]\s*(.*)$'
+    pattern = r'^\[([^$$]*)\]\s*(.*)$'
     match = re.match(pattern, line.strip())
 
     if match:

@@ -112,12 +112,15 @@ class job:
             "config": self.config,
             "depNames": depNames,
             "done": "false",
+            "failed": "false",
         }
         # to test if job is done takes long time
         # because log file needs to be checked
         # so its best to save this status
         if self.done:
             jobDict["done"] = "true"
+        if self.failed:
+            jobDict["failed"] = "true"
         return jobDict
 
     def load(self, jobDict: Dict[str, Any]) -> None:
@@ -128,7 +131,7 @@ class job:
         """
 
         # Validate required keys
-        required_keys = ["jobIDs", "config"]
+        required_keys = ["jobIDs", "jobDir", "config", "jobTimeStamp"]
         missing_keys = [k for k in required_keys if k not in jobDict]
         if missing_keys:
             log.error(f"Job dictionary missing required keys: {missing_keys}")
@@ -143,6 +146,9 @@ class job:
         if "done" in jobDict and jobDict["done"] == "true":
             log.debug("Job is already done")
             self.done = True
+        if "failed" in jobDict and jobDict["failed"] == "true":
+            log.debug("Job has failed")
+            self.failed = True
 
         # set cluster IDs
         self.jobIDs = jobDict["jobIDs"]
