@@ -36,8 +36,9 @@ echo "$CMD"
 
 echo
 
-# Using eval here is necessary when using nested commands,
-eval "$CMD"
+# Using bash -c to execute command; necessary for nested commands (pipes, redirects, etc.)
+# NOTE: Commands are executed through the shell - ensure commands are from trusted sources
+bash -c "$CMD"
 
 retval=$?
 

@@ -73,6 +73,63 @@ def test_manager():
     mgr.load(retryFailed=False)
 
 
+def test_job_save_load_failed_attribute():
+    """Test that failed attribute is saved and loaded correctly."""
+    schedd = MockHTCondor.Schedd()
+    j = job("test_failed", schedd)  # type: ignore
+    j.set_simple("my_script.sh", "log")
+
+    # Test initial state
+    assert j.failed is False
+
+    # Manually set failed state
+    j.failed = True
+
+    # Save the job
+    saved_dict = j.save()
+    assert "failed" in saved_dict
+    assert saved_dict["failed"] == "true"
+
+    # Create a new job and load the saved state
+    j2 = job("test_failed_loaded", schedd)  # type: ignore
+    j2.load(saved_dict)
+    assert j2.failed is True
+
+    # Test with failed=False
+    j3 = job("test_not_failed", schedd)  # type: ignore
+    j3.set_simple("my_script.sh", "log")
+    saved_dict2 = j3.save()
+    assert saved_dict2["failed"] == "false"
+
+    j4 = job("test_not_failed_loaded", schedd)  # type: ignore
+    j4.load(saved_dict2)
+    assert j4.failed is False
+
+
+def test_job_save_load_backwards_compatibility():
+    """Test that old save files without failed attribute still work."""
+    schedd = MockHTCondor.Schedd()
+    j = job("test_backwards_compat", schedd)  # type: ignore
+    j.set_simple("my_script.sh", "log")
+
+    # Create old-style save dict without failed attribute
+    old_save_dict = {
+        "jobIDs": [],
+        "jobDir": "",
+        "jobTimeStamp": "",
+        "config": {"executable": "my_script.sh", "log": "log"},
+        "depNames": [],
+        "done": "false",
+        # No "failed" key
+    }
+
+    # Should not raise an exception and failed should default to False
+    j.load(old_save_dict)
+    assert j.failed is False
+
+
 if __name__ == "__main__":
     test_job()
     test_manager()
+    test_job_save_load_failed_attribute()
+    test_job_save_load_backwards_compatibility()

@@ -112,12 +112,15 @@ class job:
             "config": self.config,
             "depNames": depNames,
             "done": "false",
+            "failed": "false",
         }
         # to test if job is done takes long time
         # because log file needs to be checked
         # so its best to save this status
         if self.done:
             jobDict["done"] = "true"
+        if self.failed:
+            jobDict["failed"] = "true"
         return jobDict
 
     def load(self, jobDict: Dict[str, Any]) -> None:
@@ -127,10 +130,12 @@ class job:
             jobDict (Dict[str, Any]): dictionary containing job information
         """
 
-        # TODO: define proper "jobDict checker"
-        if "jobIDs" not in jobDict.keys() and "config" not in jobDict.keys():
-            log.error("Job dictionary in a wrong form")
-            raise SystemError
+        # Validate required keys
+        required_keys = ["jobIDs", "jobDir", "config", "jobTimeStamp"]
+        missing_keys = [k for k in required_keys if k not in jobDict]
+        if missing_keys:
+            log.error(f"Job dictionary missing required keys: {missing_keys}")
+            raise ValueError(f"Job dictionary missing required keys: {missing_keys}")
 
         # the htcondor version of the configuration
         self.config = jobDict["config"]
@@ -141,6 +146,9 @@ class job:
         if "done" in jobDict and jobDict["done"] == "true":
             log.debug("Job is already done")
             self.done = True
+        if "failed" in jobDict and jobDict["failed"] == "true":
+            log.debug("Job has failed")
+            self.failed = True
 
         # set cluster IDs
         self.jobIDs = jobDict["jobIDs"]
@@ -420,8 +428,12 @@ class job:
             int: status of the job
         """
         # Check log file to determine if job finished with an error
-        with open(self.logFile, 'r') as fl:
-            search = fl.read()
+        try:
+            with open(self.logFile, 'r') as fl:
+                search = fl.read()
+        except OSError as e:
+            log.warning(f"Failed to read log file {self.logFile}: {e}")
+            return 0
 
         # User abortion is special case
         if "Job was aborted by the user" in search:

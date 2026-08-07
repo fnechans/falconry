@@ -13,7 +13,7 @@ import copy
 from glob import glob
 from typing import Dict, Any, Tuple, Optional
 
-from .lock import lock, LockFileException
+from .lock import LockFile, LockFileException
 from .job import job
 from .status import FalconryStatus
 from . import cli
@@ -101,8 +101,12 @@ class manager:
         self.lockFile = os.path.join(self.dir, 'lock')
         log.addHandler(logging.FileHandler(self.logFile))
 
+        # Acquire and hold lock for the entire lifetime of the manager instance
+        # This prevents multiple manager instances from operating on the same directory
+        self._lock = None
         try:
-            self._check_lock()
+            self._lock = LockFile(self.lockFile)
+            self._lock.__enter__()  # Acquire and hold the lock
         except LockFileException:
             sys.exit(1)
 
@@ -115,17 +119,15 @@ class manager:
         self.curJobIdle = 0
         self.keepSaveFiles = keepSaveFiles
 
-    def _check_lock(self) -> None:
-        """Raises an exception if the lock file already exists.
-
-        This indicates that the manager is already running.
-        """
-        if os.path.exists(self.lockFile):
-            log.error(f"Manager instance is already running in {self.dir}")
-            log.debug(
-                f"Delete {self.lockFile} to start a new instance if you think this is a mistake"
-            )
-            raise LockFileException
+    def _release_lock(self) -> None:
+        """Release the instance lock."""
+        if hasattr(self, '_lock') and self._lock is not None:
+            try:
+                self._lock.__exit__(None, None, None)
+            except Exception:
+                pass  # Ignore errors during unlock
+            finally:
+                self._lock = None
 
     def _delete(self) -> None:
         """Deletes the contents of the manager directory,
@@ -144,7 +146,6 @@ class manager:
                 log.info(f"  {f}")
             raise e
 
-    @lock
     def check_savefile_status(self) -> Tuple[bool, Optional[str]]:
         """Checks if the save file already exists. If it does, asks the user
         whether to load existing jobs or start new ones.
@@ -193,7 +194,6 @@ class manager:
 
         return True, "n"  # automatically assume new
 
-    @lock
     def ask_for_message(self) -> None:
         """Asks user for a message to be saved in the save file for bookkeeping."""
 
@@ -202,7 +202,6 @@ class manager:
         if i:
             self.mgrMsg = [sys.stdin.readline().strip()]
 
-    @lock
     def add_job(self, j: job, update: bool = False) -> None:
         """Adds a job to the manager. If the job already exists and `update` is
         `True`, it will be updated.
@@ -241,7 +240,6 @@ class manager:
 
         self.jobs[j.name] = j
 
-    @lock
     def save(self, quiet: bool = False, prefix: str = "") -> None:
         """Saves the current status of the jobs to a json file.
 
@@ -278,35 +276,48 @@ class manager:
         else:
             saveFileName = self.saveFileName
 
-        # save with a timestamp as a suffix, create sym link
+        # save with a timestamp and process ID as a suffix, create sym link
         current_time = datetime.datetime.now().strftime("%Y%m%d_%H%M_%S")
         fileLatest = f"{saveFileName}.latest"
-        fileSuf = f"{saveFileName}.{current_time}"  # only if not quiet
+        # Include process ID to avoid race conditions with timestamp
+        fileSuf = f"{saveFileName}.{current_time}_{os.getpid()}"  # only if not quiet
 
         is_first = not os.path.exists(fileLatest)
         fileFirst = f"{saveFileName}.first"
 
-        with open(fileLatest, "w") as f:
+        # Atomic write: write to temp file, then rename
+        temp_file = f"{fileLatest}.tmp.{os.getpid()}"
+        with open(temp_file, "w") as f:
             json.dump(output, f, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.rename(temp_file, fileLatest)
         if not quiet:
             log.info("Success! Making copy with time-stamp.")
             log.debug(f"Time-stamped file: {fileSuf}")
-            if not os.path.exists(fileSuf):
+            try:
                 shutil.copyfile(fileLatest, fileSuf)
-            else:
-                raise FileExistsError(
-                    f"Destination file {fileSuf} already exists. "
-                    "This should not be possible."
-                )
+            except IOError as e:
+                log.warning(f"Failed to create timestamped copy {fileSuf}: {e}")
+                # Not critical - the .latest file is the important one
         if is_first:
-            shutil.copyfile(fileLatest, fileFirst)
+            try:
+                shutil.copyfile(fileLatest, fileFirst)
+            except IOError as e:
+                log.warning(f"Failed to create first copy {fileFirst}: {e}")
 
         # not necessary to remove, but maybe better to be sure its not broken
         if os.path.exists(saveFileName):
             os.remove(saveFileName)
         os.symlink(fileLatest.split("/")[-1], saveFileName)
 
-        # clean up old save files
+        self._cleanup_old_save_files(saveFileName)
+
+    def _cleanup_old_save_files(self, saveFileName: str) -> None:
+        """Clean up old save files, keeping only keepSaveFiles copies."""
+        fileFirst = f"{saveFileName}.first"
+        fileLatest = f"{saveFileName}.latest"
+
         files = glob(f"{saveFileName}.*")
         # remove first/latest
         # in principle the conditions are not necessary...
@@ -321,7 +332,6 @@ class manager:
             log.debug(f"Removing old save file {fl}")
             os.remove(fl)
 
-    @lock
     def load(self, retryFailed: bool = False) -> None:
         """Loads the saved status of the jobs from a json file
         provided by the user.
@@ -351,7 +361,13 @@ class manager:
                 self._add_job(j, update=True)
 
                 # decorate the list of names of the dependencies
-                depNames[j.name] = jobDict["depNames"]
+                dep_names = jobDict.get("depNames", [])
+                if not isinstance(dep_names, list):
+                    log.error(
+                        f"depNames for job {name} is not a list: {type(dep_names)}"
+                    )
+                    dep_names = []
+                depNames[j.name] = dep_names
 
         # Now that jobs are defined, dependencies can be recreated
         # also resubmit jobs which failed
@@ -372,12 +388,14 @@ class manager:
                 log.error("Saving and exitting ...")
                 self._save()
                 self.print_failed()
+                self._release_lock()
                 sys.exit(0)
             except Exception:
                 log.error("Error ocurred when running manager!")
                 traceback.print_exc(file=sys.stdout)
                 self._save()
                 self.print_failed()
+                self._release_lock()
                 sys.exit(1)
 
     def print_running(self, printLogs: bool = False) -> None:
@@ -425,32 +443,56 @@ class manager:
                     log.info("Last 10 lines of error file:")
                     print(tail_file(j.errFile, 10))
 
+    def _add_to_queue(self, j: job, force: bool) -> None:
+        """Adds job to queue if not there already and not full
+        """
+        if self.maxJobIdle != -1 and self.curJobIdle >= self.maxJobIdle:
+            return  # Skip this job but continue checking others
+        if j in self.sub_queue:
+            return
+        j.submit(force=force, doNotSubmit=True)
+        self.sub_queue.append(j)
+        self.curJobIdle += 1
+
     def _check_dependence(self) -> None:
         """Checks status of all jobs and their dependencies to determine
-        if job is skipped. This is purely for printing purposes,
-        in the backend, jobs are
+        if job is skipped or needs resubmission.
         """
 
         # TODO: consider if not submitted jobs in a special list
         for name, j in self.jobs.items():
+            # Check if job needs resubmission (condor problems)
+            if j.submitted and not j.skipped and not j.done:
+                status = j.get_status()
+                # Always resubmit ABORTED_BY_USER jobs
+                if status == FalconryStatus.ABORTED_BY_USER:
+                    log.warning(
+                        f"Error! Job {j.name} (id {j.jobID}) failed due to condor, rerunning"
+                    )
+                    self._add_to_queue(j, force=True)
+                    continue  # Move to next job after resubmitting
+                continue
+
             # only check jobs which are neither submitted nor skipped
             if j.submitted or j.skipped:
                 continue
 
-            # if ready submit, single not done dependency leads to isReady=False
+            # Check all dependencies - a job is ready only if ALL are done
             isReady = True
             for tarJob in j.dependencies:
-                # if any job is not done, do not submit
                 if tarJob.done:
                     continue
 
+                # Found a non-done dependency - job is not ready
                 isReady = False
 
+                # Check if this dependency requires the job to be skipped
                 if tarJob.skipped or tarJob.failed:
                     log.error(
                         f"Job {name} depends on job {tarJob.name} which either failed or was skipped! Skipping ..."
                     )
                     j.skipped = True
+                    break
 
                 status = tarJob.get_status()
                 if status == FalconryStatus.REMOVED:
@@ -458,16 +500,10 @@ class manager:
                         f"Job {name} depends on job {tarJob.name} which is {FalconryStatus.REMOVED}! Skipping ..."
                     )
                     j.skipped = True
-
-                break
+                    break
 
             if isReady:
-                # Check if we did not reach maximum number of submitted jobs
-                if self.maxJobIdle != -1 and self.curJobIdle > self.maxJobIdle:
-                    break  # break because it does not make sense to check any other jobs now
-                j.submit(doNotSubmit=True)
-                self.sub_queue.append(j)
-                self.curJobIdle += 1  # Add the jobs as a idle for now
+                self._add_to_queue(j, force=False)
 
     def _check_resubmit(self, j: job, retryFailed: bool = False) -> FalconryStatus:
         """Checks if a job should be resubmitted due to some known problems.
@@ -482,24 +518,26 @@ class manager:
         """
         status = j.get_status()
         log.debug("Job %s has status %s", j.name, status.name)
-        if status is FalconryStatus.ABORTED_BY_USER:
+        if retryFailed and j.skipped:
+            log.warning(
+                f"Error! Job {j.name} was skipped and will be retried, rerunning"
+            )
+            j.skipped = False
+        elif status is FalconryStatus.ABORTED_BY_USER:
             log.warning(
                 f"Error! Job {j.name} (id {j.jobID}) failed due to condor, rerunning"
             )
-            j.submit(force=True, doNotSubmit=True)
-            self.sub_queue.append(j)
+            self._add_to_queue(j, force=True)
         elif retryFailed and status is FalconryStatus.FAILED:
             log.warning(
                 f"Error! Job {j.name} (id {j.jobID}) failed and will be retried, rerunning"
             )
-            j.submit(force=True, doNotSubmit=True)
-            self.sub_queue.append(j)
+            self._add_to_queue(j, force=True)
         elif retryFailed and status is FalconryStatus.REMOVED:
             log.warning(
                 f"Error! Job {j.name} (id {j.jobID}) was removed and will be retried, rerunning"
             )
-            j.submit(force=True, doNotSubmit=True)
-            self.sub_queue.append(j)
+            self._add_to_queue(j, force=True)
         elif (
             retryFailed
             and j.submitted
@@ -511,13 +549,7 @@ class manager:
             log.warning(
                 f"Error! Job {j.name} was not submitted succesfully (probably...), rerunning"
             )
-            j.submit(force=True, doNotSubmit=True)
-            self.sub_queue.append(j)
-        elif retryFailed and j.skipped:
-            log.warning(
-                f"Error! Job {j.name} was skipped and will be retried, rerunning"
-            )
-            j.skipped = False
+            self._add_to_queue(j, force=True)
         # If job did not change, return original status,
         # otherwise return new status
         else:
@@ -548,7 +580,6 @@ class manager:
 
     def _count_job(self, c: Counter, j: job) -> None:  # noqa: ignore=C901
         """Updates the counter object with the status of a single job.
-        Also resubmits jobs which failed due to condor problems.
 
         Arguments:
             c (counter): counter object to update
@@ -565,8 +596,8 @@ class manager:
             c.done += 1
             return
 
-        #  resubmit job which failed due to condor problems
-        status = self._check_resubmit(j)
+        # Just get status for counting - no resubmission side effects
+        status = j.get_status()
 
         if (
             status == FalconryStatus.NOT_SUBMITTED
@@ -585,6 +616,16 @@ class manager:
             c.held += 1
         elif status == FalconryStatus.REMOVED:
             c.removed += 1
+        elif status == FalconryStatus.ABORTED_BY_USER:
+            c.failed += 1
+        elif status == FalconryStatus.UNKNOWN:
+            c.waiting += 1
+        elif status == FalconryStatus.TRANSPORTING:
+            c.run += 1
+        elif status == FalconryStatus.SUSPENDED:
+            c.held += 1
+        elif status == FalconryStatus.ABNORMAL_TERMINATION:
+            c.failed += 1
 
     def _submit_jobs(self) -> None:
         """Submits all jobs in the submission queue."""
@@ -865,7 +906,6 @@ class manager:
         window.mainloop()
         log.info("MONITOR: FINISHED")
 
-    @lock
     def start(self, sleepTime: int = 60, gui: bool = False) -> None:
         """Starts the manager, iteratively checking status of jobs.
 
@@ -883,13 +923,16 @@ class manager:
                 self._start_gui(sleepTime)
             else:
                 self._start_cli(sleepTime)
+            self._release_lock()
         except KeyboardInterrupt:
             log.error("Manager interrupted with keyboard!")
             log.error("Saving and exitting ...")
             self._save()
             self.print_failed()
+            self._release_lock()
             sys.exit(0)
         except LockFileException:
+            self._release_lock()
             sys.exit(1)
         except Exception as e:
             log.error("Error ocurred when running manager!")
@@ -897,4 +940,5 @@ class manager:
             traceback.print_exc(file=sys.stdout)
             self._save()
             self.print_failed()
+            self._release_lock()
             sys.exit(2)
