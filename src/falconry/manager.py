@@ -13,7 +13,7 @@ import copy
 from glob import glob
 from typing import Dict, Any, Tuple, Optional
 
-from .lock import lock, LockFile, LockFileException
+from .lock import LockFile, LockFileException
 from .job import job
 from .status import FalconryStatus
 from . import cli
@@ -101,10 +101,12 @@ class manager:
         self.lockFile = os.path.join(self.dir, 'lock')
         log.addHandler(logging.FileHandler(self.logFile))
 
-        # Check if another manager instance is already running using atomic locking
+        # Acquire and hold lock for the entire lifetime of the manager instance
+        # This prevents multiple manager instances from operating on the same directory
+        self._lock = None
         try:
-            with LockFile(self.lockFile):
-                pass  # Lock acquired and immediately released - just checking if possible
+            self._lock = LockFile(self.lockFile)
+            self._lock.__enter__()  # Acquire and hold the lock
         except LockFileException:
             sys.exit(1)
 
@@ -116,6 +118,16 @@ class manager:
         self.maxJobIdle = maxJobIdle
         self.curJobIdle = 0
         self.keepSaveFiles = keepSaveFiles
+
+    def _release_lock(self) -> None:
+        """Release the instance lock."""
+        if hasattr(self, '_lock') and self._lock is not None:
+            try:
+                self._lock.__exit__(None, None, None)
+            except Exception:
+                pass  # Ignore errors during unlock
+            finally:
+                self._lock = None
 
     def _delete(self) -> None:
         """Deletes the contents of the manager directory,
@@ -134,7 +146,6 @@ class manager:
                 log.info(f"  {f}")
             raise e
 
-    @lock
     def check_savefile_status(self) -> Tuple[bool, Optional[str]]:
         """Checks if the save file already exists. If it does, asks the user
         whether to load existing jobs or start new ones.
@@ -183,7 +194,6 @@ class manager:
 
         return True, "n"  # automatically assume new
 
-    @lock
     def ask_for_message(self) -> None:
         """Asks user for a message to be saved in the save file for bookkeeping."""
 
@@ -192,7 +202,6 @@ class manager:
         if i:
             self.mgrMsg = [sys.stdin.readline().strip()]
 
-    @lock
     def add_job(self, j: job, update: bool = False) -> None:
         """Adds a job to the manager. If the job already exists and `update` is
         `True`, it will be updated.
@@ -231,7 +240,6 @@ class manager:
 
         self.jobs[j.name] = j
 
-    @lock
     def save(self, quiet: bool = False, prefix: str = "") -> None:
         """Saves the current status of the jobs to a json file.
 
@@ -324,7 +332,6 @@ class manager:
             log.debug(f"Removing old save file {fl}")
             os.remove(fl)
 
-    @lock
     def load(self, retryFailed: bool = False) -> None:
         """Loads the saved status of the jobs from a json file
         provided by the user.
@@ -381,12 +388,14 @@ class manager:
                 log.error("Saving and exitting ...")
                 self._save()
                 self.print_failed()
+                self._release_lock()
                 sys.exit(0)
             except Exception:
                 log.error("Error ocurred when running manager!")
                 traceback.print_exc(file=sys.stdout)
                 self._save()
                 self.print_failed()
+                self._release_lock()
                 sys.exit(1)
 
     def print_running(self, printLogs: bool = False) -> None:
@@ -897,7 +906,6 @@ class manager:
         window.mainloop()
         log.info("MONITOR: FINISHED")
 
-    @lock
     def start(self, sleepTime: int = 60, gui: bool = False) -> None:
         """Starts the manager, iteratively checking status of jobs.
 
@@ -915,13 +923,16 @@ class manager:
                 self._start_gui(sleepTime)
             else:
                 self._start_cli(sleepTime)
+            self._release_lock()
         except KeyboardInterrupt:
             log.error("Manager interrupted with keyboard!")
             log.error("Saving and exitting ...")
             self._save()
             self.print_failed()
+            self._release_lock()
             sys.exit(0)
         except LockFileException:
+            self._release_lock()
             sys.exit(1)
         except Exception as e:
             log.error("Error ocurred when running manager!")
@@ -929,4 +940,5 @@ class manager:
             traceback.print_exc(file=sys.stdout)
             self._save()
             self.print_failed()
+            self._release_lock()
             sys.exit(2)
