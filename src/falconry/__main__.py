@@ -51,7 +51,7 @@ def config() -> argparse.ArgumentParser:
         '--custom-options',
         type=str,
         default='',
-        help='Custom condor options to specify for the jobs, a comma separated list',
+        help='Custom condor options to specify for the jobs, a semicolon separated list (e.g., key=value;key2=value2)',
     )
     parser.add_argument(
         '--retry-failed',
@@ -78,27 +78,33 @@ def config() -> argparse.ArgumentParser:
 
 
 def parse_custom_options(custom_options_str: str) -> dict:
-    """Parse comma-separated custom options string into a dictionary.
+    """Parse semicolon-separated custom options string into a dictionary.
 
     Arguments:
-        custom_options_str (str): comma-separated string of custom options in format 'key=value,key2=value2'
+        custom_options_str (str): semicolon-separated string of custom options in format 'key=value;key2=value2'
 
     Returns:
         dict: dictionary of custom options
+
+    Raises:
+        ValueError: if option is not in key=value format or key is empty
     """
     custom_options: dict[str, str] = {}
     if not custom_options_str:
         return custom_options
 
-    for pair in custom_options_str.split(','):
+    for pair in custom_options_str.split(';'):
         pair = pair.strip()
         if not pair:
             continue
         if '=' in pair:
             key, value = pair.split('=', 1)
-            custom_options[key.strip()] = value.strip()
+            key = key.strip()
+            if not key:
+                raise ValueError(f"Custom option key cannot be empty in '{pair}'")
+            custom_options[key] = value.strip()
         else:
-            raise ValueError(f"Custom option needs to be of form key=value, is {pair}")
+            raise ValueError(f"Custom option needs to be of form key=value, is '{pair}'")
 
     return custom_options
 
