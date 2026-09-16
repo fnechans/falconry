@@ -48,6 +48,12 @@ def config() -> argparse.ArgumentParser:
         'in square brackets, for example `[name] command.',
     )
     parser.add_argument(
+        '--custom-options',
+        type=str,
+        default='',
+        help='Custom condor options to specify for the jobs, a comma separated list',
+    )
+    parser.add_argument(
         '--retry-failed',
         action='store_true',
         help='Retry failed jobs from previous run',
@@ -69,6 +75,32 @@ def config() -> argparse.ArgumentParser:
         help='Number of cpus to request. Default is 1',
     )
     return parser
+
+
+def parse_custom_options(custom_options_str: str) -> dict:
+    """Parse comma-separated custom options string into a dictionary.
+
+    Arguments:
+        custom_options_str (str): comma-separated string of custom options in format 'key=value,key2=value2'
+
+    Returns:
+        dict: dictionary of custom options
+    """
+    custom_options: dict[str, str] = {}
+    if not custom_options_str:
+        return custom_options
+
+    for pair in custom_options_str.split(','):
+        pair = pair.strip()
+        if not pair:
+            continue
+        if '=' in pair:
+            key, value = pair.split('=', 1)
+            custom_options[key.strip()] = value.strip()
+        else:
+            raise ValueError(f"Custom option needs to be of form key=value, is {pair}")
+
+    return custom_options
 
 
 def get_name(command: str) -> str:
@@ -164,18 +196,20 @@ class Block:
     This is important to handle dependencies between blocks
     """
 
-    def __init__(self) -> None:
+    def __init__(self, time: int, ncpu: int, custom_options: dict) -> None:
         self.commands: dict[str, job] = {}
         self._lock: bool = False  # No more commands can be added
         self.dependencies: list[job] = []
+        self.time = time
+        self.ncpu = ncpu
+        self.custom_options = custom_options
 
-    def add_command(self, command: str, mgr: manager, time: int, ncpu: int = 1) -> None:
+    def add_command(self, command: str, mgr: manager) -> None:
         """Add command to block and manager.
 
         Args:
             command (str): command to add
             mgr (manager): HTCondor manager
-            time (int): expected runtime
         Raises:
             AttributeError: if block is locked
             AttributeError: if command is not valid
@@ -189,7 +223,7 @@ class Block:
             log.error(f'Block {name} already has command {self.commands[name]}')
             raise AttributeError
         self.commands[name] = quick_job(
-            name, command, mgr.schedd, mgr.dir + '/log', time, ncpu
+            name, command, mgr.schedd, mgr.dir + '/log', self.time, self.ncpu, self.custom_options
         )
         mgr.add_job(self.commands[name])
         log.info(f'Added command `{command}` to falconry under name `{name}`')
@@ -214,7 +248,7 @@ class Block:
         return len(self.commands) == 0
 
 
-def process_commands(commands: str, mgr: manager, time: int, ncpu: int = 1) -> None:
+def process_commands(commands: str, mgr: manager, time: int, ncpu: int, custom_options: dict) -> None:
     """Process commands and add them to the manager"""
 
     # First check if we are dealing with file
@@ -232,7 +266,7 @@ def process_commands(commands: str, mgr: manager, time: int, ncpu: int = 1) -> N
     log.debug(lines)
 
     previous_block = None
-    current_block = Block()
+    current_block = Block(time, ncpu, custom_options)
     for line in lines:
         line = line.strip()
         if line.startswith('#'):
@@ -242,7 +276,7 @@ def process_commands(commands: str, mgr: manager, time: int, ncpu: int = 1) -> N
                 continue
             previous_block = current_block
             previous_block.lock()
-            current_block = Block()
+            current_block = Block(time, ncpu, custom_options)
             # Automatically depends on the previous block
             current_block.add_dependency(previous_block)
             continue
@@ -250,7 +284,7 @@ def process_commands(commands: str, mgr: manager, time: int, ncpu: int = 1) -> N
         # remove extra spaces
         command = ' '.join(command.split())
 
-        current_block.add_command(command, mgr, time, ncpu)
+        current_block.add_command(command, mgr)
     current_block.lock()
 
 
@@ -284,7 +318,8 @@ def main() -> None:
     if load:
         mgr.load(cfg.retry_failed)
     else:
-        process_commands(cfg.commands, mgr, cfg.set_time, cfg.ncpu)
+        custom_options = parse_custom_options(cfg.custom_options)
+        process_commands(cfg.commands, mgr, cfg.set_time, cfg.ncpu, custom_options)
     if cfg.dry:
         return
     # start the manager
