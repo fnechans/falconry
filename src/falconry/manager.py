@@ -936,7 +936,12 @@ class manager:
             self.print_failed()
 
             has_failures = any(
-                j.lastStatus in (FalconryStatus.FAILED, FalconryStatus.REMOVED)
+                j.lastStatus in (
+                    FalconryStatus.FAILED,
+                    FalconryStatus.REMOVED,
+                    FalconryStatus.ABNORMAL_TERMINATION,
+                    FalconryStatus.ABORTED_BY_USER,
+                )
                 for j in self.jobs.values()
             )
 
@@ -961,3 +966,5 @@ class manager:
             self.print_failed()
             self._release_lock()
             return 2
+        finally:
+            self._release_lock()

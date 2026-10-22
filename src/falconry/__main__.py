@@ -360,6 +360,10 @@ def main() -> None:
         log.setLevel(logging.DEBUG)
         logging.getLogger('falconry').setLevel(logging.DEBUG)
 
+    if cfg.commands is None and not cfg.continue_:
+        log.error("Commands are required unless --continue is specified")
+        sys.exit(2)
+
     mgr, load = setup_manager(cfg)
 
     if not cfg.continue_:
