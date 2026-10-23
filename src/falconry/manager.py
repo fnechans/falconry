@@ -146,15 +146,20 @@ class manager:
                 log.info(f"  {f}")
             raise e
 
-    def check_savefile_status(self) -> Tuple[bool, Optional[str]]:
+    def check_savefile_status(self, non_interactive: bool = False) -> Tuple[bool, Optional[str]]:
         """Checks if the save file already exists. If it does, asks the user
         whether to load existing jobs or start new ones.
+
+        Arguments:
+            non_interactive (bool): If True, automatically loads when savefile exists.
 
         Returns:
             Tuple[bool, Optional[str]]: (True, 'l') if load, (True, 'n') if new,
             (False, None) if error
         """
         if os.path.exists(self.saveFileName):
+            if non_interactive:
+                return True, "l"
             log.warning(f"Manager directory {self.dir} already exists!")
 
             state, var = cli.input_checker(
@@ -906,7 +911,7 @@ class manager:
         window.mainloop()
         log.info("MONITOR: FINISHED")
 
-    def start(self, sleepTime: int = 60, gui: bool = False) -> None:
+    def start(self, sleepTime: int = 60, gui: bool = False) -> int:
         """Starts the manager, iteratively checking status of jobs.
 
         Makes sure to save the current state of jobs
@@ -917,23 +922,42 @@ class manager:
                 Defaults to 60.
             gui (bool, optional): whether to use GUI. Defaults to False.
                 GUI is experimental!
+
+        Returns:
+            int: 0 for success, 1 for failures, 2 for other errors
         """
         try:
             if gui:
                 self._start_gui(sleepTime)
             else:
                 self._start_cli(sleepTime)
+
+            self._save()
+            self.print_failed()
+
+            has_failures = any(
+                j.lastStatus in (
+                    FalconryStatus.FAILED,
+                    FalconryStatus.REMOVED,
+                    FalconryStatus.ABNORMAL_TERMINATION,
+                    FalconryStatus.ABORTED_BY_USER,
+                )
+                for j in self.jobs.values()
+            )
+
             self._release_lock()
+            return 1 if has_failures else 0
+
         except KeyboardInterrupt:
             log.error("Manager interrupted with keyboard!")
             log.error("Saving and exitting ...")
             self._save()
             self.print_failed()
             self._release_lock()
-            sys.exit(0)
+            return 0
         except LockFileException:
             self._release_lock()
-            sys.exit(1)
+            return 1
         except Exception as e:
             log.error("Error ocurred when running manager!")
             log.error(str(e))
@@ -941,4 +965,6 @@ class manager:
             self._save()
             self.print_failed()
             self._release_lock()
-            sys.exit(2)
+            return 2
+        finally:
+            self._release_lock()

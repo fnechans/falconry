@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 import logging
+import sys
 from .manager import manager
 from .job import job
 from .quick_job import quick_job
@@ -23,6 +24,12 @@ def config() -> argparse.ArgumentParser:
     )
     parser.add_argument('--dry', action='store_true', help='Dry run')
     parser.add_argument(
+        '--continue',
+        dest='continue_',
+        action='store_true',
+        help='Continue with existing jobs from save file (automatically loads without prompting)',
+    )
+    parser.add_argument(
         '--dir',
         type=str,
         default='condor_output',
@@ -38,6 +45,7 @@ def config() -> argparse.ArgumentParser:
     parser.add_argument(
         'commands',
         type=str,
+        nargs='?',
         help='Commands to run. Can be '
         'either be specified directly in the cli one can specify link to '
         'file with multiple commands. In cli, commands separated by ;, in file '
@@ -294,46 +302,80 @@ def process_commands(commands: str, mgr: manager, time: int, ncpu: int, custom_o
     current_block.lock()
 
 
+def setup_manager(cfg: argparse.Namespace) -> tuple:
+    """Initialize manager and check savefile status.
+
+    Returns:
+        tuple: (manager, should_load)
+    """
+    condor_dir = os.path.join(cfg.dir, cfg.subdir)
+
+    mgr = None
+    try:
+        mgr = manager(condor_dir)
+    except SystemExit as e:
+        # Lock was not acquired if manager.__init__ failed
+        sys.exit(e.code if e.code is not None else 1)
+
+    try:
+        status, var = mgr.check_savefile_status(non_interactive=cfg.continue_)
+    except FileExistsError:
+        mgr._release_lock()  # Release lock before exit
+        sys.exit(1)
+
+    if not status:
+        mgr._release_lock()  # Release lock before exit
+        sys.exit(1)
+
+    if cfg.continue_ and var != "l":
+        log.error("No existing jobs to continue")
+        mgr._release_lock()  # Release lock before exit
+        sys.exit(1)
+
+    return mgr, var == "l"
+
+
+def load_or_process_jobs(mgr: manager, cfg: argparse.Namespace, load: bool) -> None:
+    """Load existing jobs or process new commands."""
+    try:
+        if load:
+            mgr.load(cfg.retry_failed)
+        else:
+            custom_options = parse_custom_options(cfg.custom_options)
+            process_commands(cfg.commands, mgr, cfg.set_time, cfg.ncpu, custom_options)
+    except (ValueError, IOError) as e:
+        log.error(str(e))
+        mgr._release_lock()  # Release lock before exit
+        sys.exit(1)
+
+
 def main() -> None:
     """Main function for `falconry`"""
 
     kerberos_auth()
     log.info('Setting up `falconry` to run your commands')
     cfg = config().parse_args()
-    condor_dir = os.path.join(cfg.dir, cfg.subdir)
-    mgr = manager(condor_dir)  # the argument specifies where the job is saved
 
     if cfg.verbose:
         log.setLevel(logging.DEBUG)
         logging.getLogger('falconry').setLevel(logging.DEBUG)
 
-    # Check if to run previous instance
-    load = False
-    status, var = mgr.check_savefile_status()
+    if cfg.commands is None and not cfg.continue_:
+        log.error("Commands are required unless --continue is specified")
+        sys.exit(2)
 
-    if status is True:
-        if var == "l":
-            load = True
-    else:
-        return
+    mgr, load = setup_manager(cfg)
 
-    # Ask for message to be saved in the save file
-    # Alwayas good to have some documentation ...
-    mgr.ask_for_message()
+    if not cfg.continue_:
+        mgr.ask_for_message()
 
-    if load:
-        mgr.load(cfg.retry_failed)
-    else:
-        custom_options = parse_custom_options(cfg.custom_options)
-        process_commands(cfg.commands, mgr, cfg.set_time, cfg.ncpu, custom_options)
+    load_or_process_jobs(mgr, cfg, load)
+
     if cfg.dry:
-        return
-    # start the manager
-    # if there is an error, especially interupt with keyboard,
-    # saves the current state of jobs
-    mgr.start(60, gui=False)  # argument is interval between checking of the jobs
-    mgr.save()
-    mgr.print_failed()
+        mgr._release_lock()  # Release lock before exit
+        sys.exit(0)
+
+    sys.exit(mgr.start(60, gui=False))
 
 
 if __name__ == '__main__':
