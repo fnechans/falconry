@@ -120,7 +120,7 @@ class manager:
         self.maxJobIdle = maxJobIdle
         self.curJobIdle = 0
         self.keepSaveFiles = keepSaveFiles
-        self._in_context_manager = False  # Track if managed by context manager
+        self._context_depth = 0  # Track context manager nesting depth
 
     def _release_lock(self, _from_context_manager: bool = False, _internal: bool = False) -> None:
         """Release the instance lock.
@@ -133,7 +133,7 @@ class manager:
         This method will be removed in a future version.
         """
         # Skip if already managed by context manager (unless called from __exit__)
-        if hasattr(self, '_in_context_manager') and self._in_context_manager and not _from_context_manager:
+        if self._context_depth > 0 and not _from_context_manager:
             return
 
         if not _from_context_manager and not _internal:
@@ -144,7 +144,7 @@ class manager:
                 stacklevel=2
             )
 
-        if hasattr(self, '_lock') and self._lock is not None:
+        if self._lock is not None:
             try:
                 self._lock.__exit__(None, None, None)
             except Exception:
@@ -158,13 +158,28 @@ class manager:
         Returns:
             self: The manager instance for use in 'with' statement
 
+        Raises:
+            RuntimeError: If lock has been released or a context is already active
+
         Example:
             >>> with manager('/path/to/dir') as mgr:
             ...     mgr.add_job(...)
             ...     mgr.start()
             # Lock automatically released here
         """
-        self._in_context_manager = True
+        # Reject if lock has been released
+        if self._lock is None:
+            raise RuntimeError(
+                "Cannot enter context manager: lock has been released. "
+                "A manager instance can only be used once as a context manager."
+            )
+        # Reject if already in a context (no nesting allowed)
+        if self._context_depth > 0:
+            raise RuntimeError(
+                "Cannot enter nested context manager: a manager instance is already in use. "
+                "Use separate manager instances for nested operations."
+            )
+        self._context_depth = 1
         return self
 
     def __exit__(
@@ -183,7 +198,9 @@ class manager:
         Note:
             Does not suppress exceptions (returns False)
         """
-        self._release_lock(_from_context_manager=True)
+        if self._context_depth > 0:
+            self._context_depth = 0
+            self._release_lock(_from_context_manager=True)
 
     def _delete(self) -> None:
         """Deletes the contents of the manager directory,
