@@ -236,7 +236,8 @@ class TestCheckDependenceMultipleDeps:
     def test_failed_dep_skips_job(self, mgr, make_job):
         """When any dependency failed, job is skipped."""
         dep1 = make_job("dep1", done=True, submitted=False, add_to_mgr=mgr)
-        dep2 = make_job("dep2", done=False, failed=True, submitted=False, add_to_mgr=mgr)
+        # A failed job must have been submitted first, so submitted=True
+        dep2 = make_job("dep2", done=False, failed=True, submitted=True, add_to_mgr=mgr)
 
         j = make_job("job", done=False, submitted=False, add_to_mgr=mgr)
         j.dependencies = [dep1, dep2]
