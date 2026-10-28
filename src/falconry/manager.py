@@ -136,14 +136,8 @@ class manager:
         if self._context_depth > 0 and not _from_context_manager:
             return
 
-        if not _from_context_manager and not _internal:
-            warnings.warn(
-                "Directly calling _release_lock() is deprecated. "
-                "Use 'with manager(...) as mgr:' pattern instead for automatic lock management.",
-                DeprecationWarning,
-                stacklevel=2
-            )
-
+        # Release lock first, before any potential warning
+        # This ensures lock is always released even if warning raises exception
         if self._lock is not None:
             try:
                 self._lock.__exit__(None, None, None)
@@ -151,6 +145,14 @@ class manager:
                 pass  # Ignore errors during unlock
             finally:
                 self._lock = None
+
+        if not _from_context_manager and not _internal:
+            warnings.warn(
+                "Directly calling _release_lock() is deprecated. "
+                "Use 'with manager(...) as mgr:' pattern instead for automatic lock management.",
+                DeprecationWarning,
+                stacklevel=2
+            )
 
     def __enter__(self) -> 'manager':
         """Enter context manager. Lock is already acquired in __init__.
