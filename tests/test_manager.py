@@ -236,7 +236,8 @@ class TestCheckDependenceMultipleDeps:
     def test_failed_dep_skips_job(self, mgr, make_job):
         """When any dependency failed, job is skipped."""
         dep1 = make_job("dep1", done=True, submitted=False, add_to_mgr=mgr)
-        dep2 = make_job("dep2", done=False, failed=True, submitted=False, add_to_mgr=mgr)
+        # A failed job must have been submitted first, so submitted=True
+        dep2 = make_job("dep2", done=False, failed=True, submitted=True, add_to_mgr=mgr)
 
         j = make_job("job", done=False, submitted=False, add_to_mgr=mgr)
         j.dependencies = [dep1, dep2]
@@ -244,6 +245,47 @@ class TestCheckDependenceMultipleDeps:
         mgr._check_dependence()
 
         assert j.skipped is True
+
+    def test_failed_dep_in_queue_does_not_skip_job(self, mgr, make_job):
+        """When a dependency failed but is in sub_queue (being retried), job is NOT skipped."""
+        dep1 = make_job("dep1", done=True, submitted=False, add_to_mgr=mgr)
+        # Failed dependency that's being retried (in sub_queue)
+        dep2 = make_job("dep2", done=False, failed=True, submitted=True, add_to_mgr=mgr)
+        mgr.sub_queue.append(dep2)  # Put it in the retry queue
+
+        j = make_job("job", done=False, submitted=False, add_to_mgr=mgr)
+        j.dependencies = [dep1, dep2]
+
+        mgr._check_dependence()
+
+        # Job should NOT be skipped because dep2 is being retried
+        assert j.skipped is False
+        # Job should NOT be added to queue yet (dep2 not done)
+        assert j not in mgr.sub_queue
+
+    def test_removed_dep_in_queue_does_not_skip_job(self, mgr, make_job):
+        """When a dependency is removed but is in sub_queue (being retried), job is NOT skipped."""
+        dep1 = make_job("dep1", done=True, submitted=False, add_to_mgr=mgr)
+        # Removed dependency that's being retried (in sub_queue)
+        dep2 = make_job(
+            "dep2",
+            done=False,
+            failed=False,
+            submitted=True,
+            add_to_mgr=mgr,
+            status=FalconryStatus.REMOVED,
+        )
+        mgr.sub_queue.append(dep2)  # Put it in the retry queue
+
+        j = make_job("job", done=False, submitted=False, add_to_mgr=mgr)
+        j.dependencies = [dep1, dep2]
+
+        mgr._check_dependence()
+
+        # Job should NOT be skipped because dep2 is being retried
+        assert j.skipped is False
+        # Job should NOT be added to queue yet (dep2 not done)
+        assert j not in mgr.sub_queue
 
 
 class TestSingleCheckCounterConsistency:

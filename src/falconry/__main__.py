@@ -302,53 +302,6 @@ def process_commands(commands: str, mgr: manager, time: int, ncpu: int, custom_o
     current_block.lock()
 
 
-def setup_manager(cfg: argparse.Namespace) -> tuple:
-    """Initialize manager and check savefile status.
-
-    Returns:
-        tuple: (manager, should_load)
-    """
-    condor_dir = os.path.join(cfg.dir, cfg.subdir)
-
-    mgr = None
-    try:
-        mgr = manager(condor_dir)
-    except SystemExit as e:
-        # Lock was not acquired if manager.__init__ failed
-        sys.exit(e.code if e.code is not None else 1)
-
-    try:
-        status, var = mgr.check_savefile_status(non_interactive=cfg.continue_)
-    except FileExistsError:
-        mgr._release_lock()  # Release lock before exit
-        sys.exit(1)
-
-    if not status:
-        mgr._release_lock()  # Release lock before exit
-        sys.exit(1)
-
-    if cfg.continue_ and var != "l":
-        log.error("No existing jobs to continue")
-        mgr._release_lock()  # Release lock before exit
-        sys.exit(1)
-
-    return mgr, var == "l"
-
-
-def load_or_process_jobs(mgr: manager, cfg: argparse.Namespace, load: bool) -> None:
-    """Load existing jobs or process new commands."""
-    try:
-        if load:
-            mgr.load(cfg.retry_failed)
-        else:
-            custom_options = parse_custom_options(cfg.custom_options)
-            process_commands(cfg.commands, mgr, cfg.set_time, cfg.ncpu, custom_options)
-    except (ValueError, IOError) as e:
-        log.error(str(e))
-        mgr._release_lock()  # Release lock before exit
-        sys.exit(1)
-
-
 def main() -> None:
     """Main function for `falconry`"""
 
@@ -364,18 +317,47 @@ def main() -> None:
         log.error("Commands are required unless --continue is specified")
         sys.exit(2)
 
-    mgr, load = setup_manager(cfg)
+    condor_dir = os.path.join(cfg.dir, cfg.subdir)
 
-    if not cfg.continue_:
-        mgr.ask_for_message()
+    # Use manager as context manager for automatic lock cleanup
+    with manager(condor_dir) as mgr:
+        # Check savefile status
+        try:
+            status, var = mgr.check_savefile_status(non_interactive=cfg.continue_)
+        except FileExistsError:
+            log.error(
+                f"Manager directory {mgr.dir} already exists but savefile is corrupted. "
+                f"Please check {mgr.saveFileName}.latest or recreate the directory."
+            )
+            sys.exit(1)
 
-    load_or_process_jobs(mgr, cfg, load)
+        if not status:
+            sys.exit(1)
 
-    if cfg.dry:
-        mgr._release_lock()  # Release lock before exit
-        sys.exit(0)
+        if cfg.continue_ and var != "l":
+            log.error("No existing jobs to continue")
+            sys.exit(1)
 
-    sys.exit(mgr.start(60, gui=False))
+        load = (var == "l")
+
+        if not cfg.continue_:
+            mgr.ask_for_message()
+
+        # Load existing jobs or process new commands
+        try:
+            if load:
+                mgr.load(cfg.retry_failed)
+            else:
+                custom_options = parse_custom_options(cfg.custom_options)
+                process_commands(cfg.commands, mgr, cfg.set_time, cfg.ncpu, custom_options)
+        except (ValueError, IOError) as e:
+            log.error(str(e))
+            sys.exit(1)
+
+        if cfg.dry:
+            sys.exit(0)
+
+        sys.exit(mgr.start(60, gui=False))
 
 
 if __name__ == '__main__':

@@ -7,6 +7,8 @@ import sys
 import traceback
 import datetime
 import select
+import warnings
+import types
 from time import sleep
 import htcondor2 as htcondor
 import copy
@@ -118,16 +120,89 @@ class manager:
         self.maxJobIdle = maxJobIdle
         self.curJobIdle = 0
         self.keepSaveFiles = keepSaveFiles
+        self._context_depth = 0  # Track context manager nesting depth
 
-    def _release_lock(self) -> None:
-        """Release the instance lock."""
-        if hasattr(self, '_lock') and self._lock is not None:
+    def _release_lock(self, _from_context_manager: bool = False, _internal: bool = False) -> None:
+        """Release the instance lock.
+
+        Args:
+            _from_context_manager: If True, called from context manager __exit__, suppresses deprecation warning
+            _internal: If True, called from internal code, suppresses deprecation warning
+
+        Deprecated: Use manager as a context manager instead for automatic lock management.
+        This method will be removed in a future version.
+        """
+        # Skip if already managed by context manager (unless called from __exit__)
+        if self._context_depth > 0 and not _from_context_manager:
+            return
+
+        # Release lock first, before any potential warning
+        # This ensures lock is always released even if warning raises exception
+        if self._lock is not None:
             try:
                 self._lock.__exit__(None, None, None)
             except Exception:
                 pass  # Ignore errors during unlock
             finally:
                 self._lock = None
+
+        if not _from_context_manager and not _internal:
+            warnings.warn(
+                "Directly calling _release_lock() is deprecated. "
+                "Use 'with manager(...) as mgr:' pattern instead for automatic lock management.",
+                DeprecationWarning,
+                stacklevel=2
+            )
+
+    def __enter__(self) -> 'manager':
+        """Enter context manager. Lock is already acquired in __init__.
+
+        Returns:
+            self: The manager instance for use in 'with' statement
+
+        Raises:
+            RuntimeError: If lock has been released or a context is already active
+
+        Example:
+            >>> with manager('/path/to/dir') as mgr:
+            ...     mgr.add_job(...)
+            ...     mgr.start()
+            # Lock automatically released here
+        """
+        # Reject if lock has been released
+        if self._lock is None:
+            raise RuntimeError(
+                "Cannot enter context manager: lock has been released. "
+                "A manager instance can only be used once as a context manager."
+            )
+        # Reject if already in a context (no nesting allowed)
+        if self._context_depth > 0:
+            raise RuntimeError(
+                "Cannot enter nested context manager: a manager instance is already in use. "
+                "Use separate manager instances for nested operations."
+            )
+        self._context_depth = 1
+        return self
+
+    def __exit__(
+        self,
+        exc_type: Optional[type],
+        exc_val: Optional[BaseException],
+        exc_tb: Optional[types.TracebackType],
+    ) -> None:
+        """Exit context manager. Releases the lock.
+
+        Args:
+            exc_type: Exception type if raised, otherwise None
+            exc_val: Exception value if raised, otherwise None
+            exc_tb: Exception traceback if raised, otherwise None
+
+        Note:
+            Does not suppress exceptions (returns False)
+        """
+        if self._context_depth > 0:
+            self._context_depth = 0
+            self._release_lock(_from_context_manager=True)
 
     def _delete(self) -> None:
         """Deletes the contents of the manager directory,
@@ -341,6 +416,10 @@ class manager:
         """Loads the saved status of the jobs from a json file
         provided by the user.
 
+        Note:
+            This method should be called from within a manager context.
+            Lock release is automatically handled by the context manager.
+
         Arguments:
             retryFailed (bool, optional): whether to retry the failed jobs.
             Defaults to False.
@@ -393,14 +472,14 @@ class manager:
                 log.error("Saving and exitting ...")
                 self._save()
                 self.print_failed()
-                self._release_lock()
+                self._release_lock(_internal=True)
                 sys.exit(0)
             except Exception:
                 log.error("Error ocurred when running manager!")
                 traceback.print_exc(file=sys.stdout)
                 self._save()
                 self.print_failed()
-                self._release_lock()
+                self._release_lock(_internal=True)
                 sys.exit(1)
 
     def print_running(self, printLogs: bool = False) -> None:
@@ -492,7 +571,8 @@ class manager:
                 isReady = False
 
                 # Check if this dependency requires the job to be skipped
-                if tarJob.skipped or tarJob.failed:
+                # Don't skip if dependency is in the submission queue (being retried)
+                if (tarJob.skipped or tarJob.failed) and tarJob not in self.sub_queue:
                     log.error(
                         f"Job {name} depends on job {tarJob.name} which either failed or was skipped! Skipping ..."
                     )
@@ -500,7 +580,7 @@ class manager:
                     break
 
                 status = tarJob.get_status()
-                if status == FalconryStatus.REMOVED:
+                if status == FalconryStatus.REMOVED and tarJob not in self.sub_queue:
                     log.error(
                         f"Job {name} depends on job {tarJob.name} which is {FalconryStatus.REMOVED}! Skipping ..."
                     )
@@ -915,7 +995,12 @@ class manager:
         """Starts the manager, iteratively checking status of jobs.
 
         Makes sure to save the current state of jobs
-        in case of interupt or crash.
+        in case of interrupt or crash.
+
+        Note:
+            This method should be called from within a manager context,
+            e.g., 'with manager(dir) as mgr: mgr.start()'.
+            Lock release is automatically handled by the context manager.
 
         Arguments:
             sleepTime (int, optional): time to sleep between checks.
@@ -926,6 +1011,7 @@ class manager:
         Returns:
             int: 0 for success, 1 for failures, 2 for other errors
         """
+        ret = 0
         try:
             if gui:
                 self._start_gui(sleepTime)
@@ -944,27 +1030,25 @@ class manager:
                 )
                 for j in self.jobs.values()
             )
-
-            self._release_lock()
-            return 1 if has_failures else 0
+            ret = 1 if has_failures else 0
 
         except KeyboardInterrupt:
             log.error("Manager interrupted with keyboard!")
             log.error("Saving and exitting ...")
             self._save()
             self.print_failed()
-            self._release_lock()
-            return 0
+            ret = 0
         except LockFileException:
-            self._release_lock()
-            return 1
+            ret = 1
         except Exception as e:
             log.error("Error ocurred when running manager!")
             log.error(str(e))
             traceback.print_exc(file=sys.stdout)
             self._save()
             self.print_failed()
-            self._release_lock()
-            return 2
+            ret = 2
         finally:
-            self._release_lock()
+            # Safe: will be skipped if context manager is active
+            self._release_lock(_internal=True)
+
+        return ret
